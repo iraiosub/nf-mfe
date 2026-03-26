@@ -1,29 +1,5 @@
 # Chimeric Interaction Sequence Extraction Pipeline
 
-### Settings for local testing
-`conda activate nfcore_tools_34`
-
-`nextflow run main.nf --fasta /Volumes/lab-ulej/home/users/luscomben/users/iosubi/projects/structurome_blencowe/ref/Homo_sapiens.GRCh38.dna.primary_assembly.fa --input samplesheet.example.tsv --outdir results -profile docker`
-
-#### Data flow with chunk matching
-```
-SPLIT_TABLE → [meta, chunk_0001.txt]
-              [meta, chunk_0002.txt]
-              [meta, chunk_0003.txt]
-                     ↓
-PREPARE_BED → [meta, chunk_0001.txt, chunk_0001_left.bed, chunk_0001_right.bed]
-              [meta, chunk_0002.txt, chunk_0002_left.bed, chunk_0002_right.bed]
-              [meta, chunk_0003.txt, chunk_0003_left.bed, chunk_0003_right.bed]
-                     ↓
-EXTRACT_SEQUENCES → [meta, chunk_0001.txt, left.fa, right.fa]
-                    [meta, chunk_0002.txt, left.fa, right.fa]
-                    [meta, chunk_0003.txt, left.fa, right.fa]
-                     ↓
-ADD_SEQUENCES → [meta, chunk_0001_with_sequences.txt]
-                [meta, chunk_0002_with_sequences.txt]
-                [meta, chunk_0003_with_sequences.txt]
-```
-
 ## This Nextflow pipeline processes chimeric interaction tables by:
 1. Splitting large tables into 10k row chunks (preserving headers)
 2. Extracting FASTA sequences for left and right coordinates using bedtools
@@ -137,4 +113,27 @@ nextflow run main.nf \
   --chunk_size 10000 \
   --outdir results \
   -profile docker
+```
+### Settings for local testing
+`conda activate nfcore_tools_34`
+
+`nextflow run main.nf --fasta /Volumes/lab-ulej/home/users/luscomben/users/iosubi/projects/structurome_blencowe/ref/Homo_sapiens.GRCh38.dna.primary_assembly.fa --input samplesheet.example.tsv --outdir results -profile docker`
+
+#### Data flow with chunk matching
+```
+SPLIT_TABLE → [meta, chunk_0001.txt]
+              [meta, chunk_0002.txt]
+              [meta, chunk_0003.txt]
+                     ↓
+PREPARE_BED → [meta, chunk_0001.txt, chunk_0001_left.bed, chunk_0001_right.bed]
+              [meta, chunk_0002.txt, chunk_0002_left.bed, chunk_0002_right.bed]
+              [meta, chunk_0003.txt, chunk_0003_left.bed, chunk_0003_right.bed]
+                     ↓
+EXTRACT_SEQUENCES → [meta, chunk_0001.txt, left.fa, right.fa]
+                    [meta, chunk_0002.txt, left.fa, right.fa]
+                    [meta, chunk_0003.txt, left.fa, right.fa]
+                     ↓
+ADD_SEQUENCES → [meta, chunk_0001_with_sequences.txt]
+                [meta, chunk_0002_with_sequences.txt]
+                [meta, chunk_0003_with_sequences.txt]
 ```

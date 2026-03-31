@@ -16,6 +16,7 @@ include { PREPARE_BED } from './modules/local/prepare_bed'
 include { EXTRACT_SEQUENCES } from './modules/local/extract_sequences'
 include { ADD_SEQUENCES } from './modules/local/add_sequences'
 include { CALCULATE_MFE } from './modules/local/calculate_mfe'
+include { CALCULATE_SHUFFLED_MFE } from './modules/local/calculate_shuffled_mfe'
 include { CONCATENATE_TABLES } from './modules/local/concatenate_tables'
 
 /*
@@ -77,11 +78,19 @@ workflow {
     ADD_SEQUENCES(EXTRACT_SEQUENCES.out.sequences)
 
     // Step 5: Calculate MFE
-    CALCULATE_MFE(ADD_SEQUENCES.out.sequence_table)
+    if (!params.shuffled_mfe) {
 
-    // Step 5: Group chunks by sample and concatenate
-    def ch_grouped = CALCULATE_MFE.out.mfe
-        .groupTuple(by: 0)
+        CALCULATE_MFE(ADD_SEQUENCES.out.sequence_table)
+        ch_mfe = CALCULATE_MFE.out.mfe
+
+    } else {
+        CALCULATE_SHUFFLED_MFE(ADD_SEQUENCES.out.sequence_table)
+        ch_mfe = CALCULATE_SHUFFLED_MFE.out.shuffled_mfe
+
+    }
+
+    // Step 6: Group chunks by sample and concatenate
+    def ch_grouped = ch_mfe.groupTuple(by: 0)
 
     CONCATENATE_TABLES(ch_grouped)
 

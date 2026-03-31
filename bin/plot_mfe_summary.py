@@ -106,6 +106,12 @@ def main():
 
     sample_name = args.sample_name if args.sample_name else Path(args.input).stem
 
+    n_before = len(df)
+    df = df[df["mfe"].isna() | (pd.to_numeric(df["mfe"], errors="coerce") <= 0)].copy()
+    n_after = len(df)
+    n_removed = n_before - n_after
+    print(f"Filtered out {n_removed:,} rows with mfe > 0; retained {n_after:,}/{n_before:,} rows.")
+
     plot_df = df.copy()
     plot_df["fdr_bh"] = bh_fdr(plot_df["empirical_p_lower"].values)
 

@@ -19,6 +19,7 @@ process CALCULATE_SHUFFLED_MFE {
         --output-summary ${prefix}_shuffled_mfe.tsv \
         --output-detail ${prefix}_shuffled_mfe_all.tsv \
         --processes ${task.cpus} \
-        --n-shuffles ${params.n_shuffles}
+        --n-shuffles ${params.n_shuffles} \
+        --klet ${params.klet_shuffles}
     """
 }

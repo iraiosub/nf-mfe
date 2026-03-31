@@ -18,6 +18,7 @@ include { ADD_SEQUENCES } from './modules/local/add_sequences'
 include { CALCULATE_MFE } from './modules/local/calculate_mfe'
 include { CALCULATE_SHUFFLED_MFE } from './modules/local/calculate_shuffled_mfe'
 include { CONCATENATE_TABLES } from './modules/local/concatenate_tables'
+include { PLOT_MFE_SUMMARY } from './modules/local/plot_mfe_summary'
 
 /*
 ========================================================================================
@@ -93,6 +94,11 @@ workflow {
     def ch_grouped = ch_mfe.groupTuple(by: 0)
 
     CONCATENATE_TABLES(ch_grouped)
+
+    // Step 7: Plot concatenated shuffled-MFE tables
+    if (params.shuffled_mfe) {
+        PLOT_MFE_SUMMARY(CONCATENATE_TABLES.out.final_table)
+    }
 
     // Emit final outputs
     emit:

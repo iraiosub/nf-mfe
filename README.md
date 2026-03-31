@@ -1,16 +1,17 @@
-# Chimeric Interaction Sequence Extraction Pipeline
+# Chimeric Interaction Sequence Extraction and MFE Computation Pipeline
 
 ## This Nextflow pipeline processes chimeric interaction tables by:
 1. Splitting large tables into 10k row chunks (preserving headers)
 2. Extracting FASTA sequences for left and right coordinates using bedtools
 3. Adding extracted sequences as new columns (lseq, rseq)
-4. Concatenating all chunks back into a single table with one header
+4. Performing MFE calculation on the extracted sequences
+5. Optionally generating shuffled control sequences for MFE comparisons
+6. Concatenating all chunks back into a single table with one header
 
 ## Requirements
 
-- Nextflow >= 23.04.0
-- bedtools >= 2.31.0
-- Python 3
+- Nextflow >= 25.10.2
+- Docker or Singularity
 
 ## Quick Start
 
@@ -20,6 +21,10 @@
 nextflow run main.nf \
   --input samplesheet.tsv \
   --fasta /path/to/genome.fa \
+  --fai /path/to/genome.fa.fai \
+  --chunk_size <n> \
+  --shuffled_mfe \
+  --n_shuffles <n> \
   --outdir results
 ```
 
@@ -36,13 +41,15 @@ GM12878_rep2	/path/to/GM12878_rep2.chim.txt
 nextflow run main.nf \
   --input_pattern 'data/*.chim.txt' \
   --fasta /path/to/genome.fa \
-  --outdir results
+  --outdir results \
+  <...>
 ```
 
 ## Parameters
 
 ### Required
 - `--fasta`: Path to reference genome FASTA file
+- `--fai`: Path to reference genome FASTA index
 
 ### Input (choose one)
 - `--input`: Path to samplesheet (TSV format)
@@ -51,6 +58,8 @@ nextflow run main.nf \
 ### Optional
 - `--outdir`: Output directory (default: './results')
 - `--chunk_size`: Number of rows per chunk (default: 10000)
+- `--shuffled_mfe`: Enable MFE calculations for shuffled control sequences (default: false)
+- `--n_shuffles`: Number of times the sequence is shuffled (default: 100)
 
 ## Input File Format
 
@@ -67,6 +76,15 @@ For each sample, the pipeline produces:
 Output columns include all original columns plus:
 - `lseq`: Extracted sequence for left coordinate (strand-aware)
 - `rseq`: Extracted sequence for right coordinate (strand-aware)
+- `mfe` : MFE (kcal/mol)
+- `dot_bracket`: Dot-bracket notation corresponding to the duplex
+- `mean_shuffled_mfe`: Mean MFE across shuffles
+- `sd_shuffled_mfe`
+- `delta_mfe`: Difference between Observed MFE and the mean MFE across shuffles
+- `zscore_mfe`
+- `empirical_p_lower`
+- `n_shuffles_ok`: Number of shuffles for which MFE was succesfully computed
+
 
 ## Execution Profiles
 
@@ -80,10 +98,6 @@ nextflow run main.nf -profile docker --input ... --fasta ...
 nextflow run main.nf -profile singularity --input ... --fasta ...
 ```
 
-### Conda
-```bash
-nextflow run main.nf -profile conda --input ... --fasta ...
-```
 
 ## Pipeline Overview
 
@@ -136,7 +150,9 @@ EXTRACT_SEQUENCES → [meta, chunk_0001.txt, left.fa, right.fa]
                     [meta, chunk_0002.txt, left.fa, right.fa]
                     [meta, chunk_0003.txt, left.fa, right.fa]
                      ↓
-ADD_SEQUENCES → [meta, chunk_0001_with_sequences.txt]
-                [meta, chunk_0002_with_sequences.txt]
-                [meta, chunk_0003_with_sequences.txt]
+ADD_SEQUENCES → [meta, chunk_0001_sequences.tsv]
+                [meta, chunk_0002_sequences.tsv]
+                [meta, chunk_0003_sequences.tsv]
+
+etc
 ```

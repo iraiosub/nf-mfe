@@ -1,5 +1,6 @@
 process CONCATENATE_TABLES {
     tag "${meta.id}"
+    label 'process_high'
 
     container 'community.wave.seqera.io/library/bedtools_python:88ef333ca5f1123a'
 

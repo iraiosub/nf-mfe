@@ -115,7 +115,11 @@ EXTRACT_SEQUENCES (bedtools getfasta -s)
     ↓
 ADD_SEQUENCES (add lseq, rseq columns)
     ↓
+CALCULATE_SHUFFLED_MFE or CALCULATE_SHUFFLED_MFE (MFE-related columns)
+    ↓
 CONCATENATE_TABLES (merge chunks)
+    ↓
+PLOT_MFE_SUMMARY (per sample)
     ↓
 Final Output
 ```
@@ -132,7 +136,7 @@ nextflow run main.nf \
   -profile docker
 ```
 
-## Notes to self 
+## Notes to self
 
 ### Settings for local testing
 `conda activate nfcore_tools_34`
@@ -157,5 +161,5 @@ ADD_SEQUENCES → [meta, chunk_0001_sequences.tsv]
                 [meta, chunk_0002_sequences.tsv]
                 [meta, chunk_0003_sequences.tsv]
 
-etc
+etc.
 ```

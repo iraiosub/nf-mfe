@@ -1,5 +1,6 @@
 process PREPARE_BED {
     tag "${meta.id}_${chunk.baseName}"
+    label 'process_low'
     
     input:
     tuple val(meta), path(chunk)

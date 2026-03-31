@@ -15,6 +15,7 @@ include { SPLIT_TABLE } from './modules/local/split_table'
 include { PREPARE_BED } from './modules/local/prepare_bed'
 include { EXTRACT_SEQUENCES } from './modules/local/extract_sequences'
 include { ADD_SEQUENCES } from './modules/local/add_sequences'
+include { CALCULATE_MFE } from './modules/local/calculate_mfe'
 include { CONCATENATE_TABLES } from './modules/local/concatenate_tables'
 
 /*
@@ -74,8 +75,11 @@ workflow {
     // Step 4: Add sequences as new columns
     ADD_SEQUENCES(EXTRACT_SEQUENCES.out.sequences)
 
+    // Step 5: Calculate MFE
+    CALCULATE_MFE(ADD_SEQUENCES.out.sequence_table)
+
     // Step 5: Group chunks by sample and concatenate
-    def ch_grouped = ADD_SEQUENCES.out.table
+    def ch_grouped = CALCULATE_MFE.out.sequence_table
         .groupTuple(by: 0)
 
     CONCATENATE_TABLES(ch_grouped)

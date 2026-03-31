@@ -1,27 +1,28 @@
 process ADD_SEQUENCES {
     tag "${meta.id}_${chunk.baseName}"
-    
+    label 'process_low'
+
     input:
     tuple val(meta), path(chunk), path(left_fa), path(right_fa)
-    
+
     output:
-    tuple val(meta), path("*_with_sequences.txt"), emit: table
-    
+    tuple val(meta), path(chunk), path("*_sequences.tsv"), emit: sequence_table
+
     script:
-    def prefix = "${chunk.baseName}"
+    def prefix = "${meta.id}_${chunk.baseName}"
     """
     #!/usr/bin/env python3
-    
+
     import csv
     import sys
     from collections import OrderedDict
-    
+
     # Parse FASTA files into dictionaries
     def parse_fasta(fasta_file):
         sequences = {}
         current_id = None
         current_seq = []
-        
+
         with open(fasta_file, 'r') as f:
             for line in f:
                 line = line.strip()
@@ -62,7 +63,7 @@ process ADD_SEQUENCES {
     total_count = 0
     
     with open('${chunk}', 'r') as infile, \\
-         open('${prefix}_with_sequences.txt', 'w') as outfile:
+         open('${prefix}_sequences.tsv', 'w') as outfile:
         
         reader = csv.DictReader(infile, delimiter='\\t')
         

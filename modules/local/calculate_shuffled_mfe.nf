@@ -1,6 +1,6 @@
 process CALCULATE_SHUFFLED_MFE {
     tag "${meta.id}_${chunk.baseName}"
-    label 'process_low'
+    label 'process_high'
 
     container 'community.wave.seqera.io/library/pandas_ushuffle_viennarna:aa51db9ac2370318'
 

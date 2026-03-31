@@ -1,6 +1,6 @@
 process CALCULATE_MFE {
     tag "${meta.id}_${chunk.baseName}"
-    label 'process_low'
+    label 'process_medium'
 
     container 'community.wave.seqera.io/library/pandas_viennarna:d01fcc9dd6f10930'
 

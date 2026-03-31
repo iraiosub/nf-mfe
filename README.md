@@ -4,8 +4,8 @@
 1. Splitting large tables into 10k row chunks (preserving headers)
 2. Extracting FASTA sequences for left and right coordinates using bedtools
 3. Adding extracted sequences as new columns (lseq, rseq)
-4. Performing MFE calculation on the extracted sequences
-5. Optionally generating shuffled control sequences for MFE comparisons
+4. Performing MFE calculation on the extracted sequences ([RNAduplex](https://www.tbi.univie.ac.at/RNA/ViennaRNA/doc/html/man/RNAduplex.html))
+5. Optionally generating shuffled control sequences for MFE comparisons ([uShuffle](https://link.springer.com/article/10.1186/1471-2105-9-192))
 6. Concatenating all chunks back into a single table with one header
 
 ## Requirements
@@ -14,6 +14,8 @@
 - Docker or Singularity
 
 ## Quick Start
+
+> Important: we assume BED-style 0-based half-open coordinates are given in the input. 
 
 ### Option 1: Using a samplesheet
 
@@ -60,6 +62,7 @@ nextflow run main.nf \
 - `--chunk_size`: Number of rows per chunk (default: 10000)
 - `--shuffled_mfe`: Enable MFE calculations for shuffled control sequences (default: false)
 - `--n_shuffles`: Number of times the sequence is shuffled (default: 100)
+- `--klet_shuffles`: klet for sequence shuffling (default: 2)
 
 ## Input File Format
 
@@ -112,7 +115,11 @@ EXTRACT_SEQUENCES (bedtools getfasta -s)
     ↓
 ADD_SEQUENCES (add lseq, rseq columns)
     ↓
+CALCULATE_SHUFFLED_MFE or CALCULATE_SHUFFLED_MFE (MFE-related columns)
+    ↓
 CONCATENATE_TABLES (merge chunks)
+    ↓
+PLOT_MFE_SUMMARY (per sample)
     ↓
 Final Output
 ```
@@ -129,7 +136,7 @@ nextflow run main.nf \
   -profile docker
 ```
 
-## Notes to self 
+## Notes to self
 
 ### Settings for local testing
 `conda activate nfcore_tools_34`
@@ -154,5 +161,5 @@ ADD_SEQUENCES → [meta, chunk_0001_sequences.tsv]
                 [meta, chunk_0002_sequences.tsv]
                 [meta, chunk_0003_sequences.tsv]
 
-etc
+etc.
 ```

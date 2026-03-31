@@ -8,7 +8,7 @@
 
 ## Requirements
 
-- Nextflow >= 23.04.0
+- Nextflow >= 25.10.2
 - Docker or Singularity
 
 ## Quick Start

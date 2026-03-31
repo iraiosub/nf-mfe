@@ -12,23 +12,24 @@ def compute_mfe(pair):
     """
     Compute RNA-RNA duplex MFE for one sequence pair.
     Expects a tuple: (lseq, rseq)
+    Returns: (mfe, structure)
     """
     lseq, rseq = pair
 
     if pd.isna(lseq) or pd.isna(rseq):
-        return None
+        return (None, None)
 
     lseq = str(lseq).strip().upper().replace("T", "U")
     rseq = str(rseq).strip().upper().replace("T", "U")
 
     if not lseq or not rseq:
-        return None
+        return (None, None)
 
     try:
         duplex = RNA.duplexfold(lseq, rseq)
-        return duplex.energy
+        return (duplex.energy, duplex.structure)
     except Exception:
-        return None
+        return (None, None)
 
 
 def main():
@@ -60,9 +61,10 @@ def main():
 
     print(f"Computing MFEs for {len(pairs):,} rows using {args.processes} processes...")
     with ProcessPoolExecutor(max_workers=args.processes) as ex:
-        mfes = list(ex.map(compute_mfe, pairs, chunksize=200))
+        results = list(ex.map(compute_mfe, pairs, chunksize=200))
 
-    df["mfe"] = mfes
+    df["mfe"] = [r[0] for r in results]
+    df["dot_bracket"] = [r[1] for r in results]
 
     print(f"Writing: {args.output}")
     df.to_csv(args.output, sep=args.sep, index=False)

@@ -50,8 +50,8 @@ workflow {
     }
 
     // Load reference genome FASTA
-    def ch_fasta = channel.fromPath(params.fasta, checkIfExists: true)
-    ch_fasta = ch_fasta.first()
+    def ch_fasta = channel.fromPath(params.fasta, checkIfExists: true).first()
+    def ch_fai = channel.fromPath(params.fai, checkIfExists: true).first()
 
     // Step 1: Split tables into chunks
     SPLIT_TABLE(
@@ -69,7 +69,8 @@ workflow {
     // Step 3: Extract sequences using bedtools getfasta
     EXTRACT_SEQUENCES(
         PREPARE_BED.out.beds,
-        ch_fasta
+        ch_fasta,
+        ch_fai
     )
 
     // Step 4: Add sequences as new columns
@@ -79,7 +80,7 @@ workflow {
     CALCULATE_MFE(ADD_SEQUENCES.out.sequence_table)
 
     // Step 5: Group chunks by sample and concatenate
-    def ch_grouped = CALCULATE_MFE.out.sequence_table
+    def ch_grouped = CALCULATE_MFE.out.mfe
         .groupTuple(by: 0)
 
     CONCATENATE_TABLES(ch_grouped)

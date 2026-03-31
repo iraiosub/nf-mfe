@@ -114,10 +114,13 @@ nextflow run main.nf \
   --outdir results \
   -profile docker
 ```
+
+## Notes to self 
+
 ### Settings for local testing
 `conda activate nfcore_tools_34`
 
-`nextflow run main.nf --fasta /Volumes/lab-ulej/home/users/luscomben/users/iosubi/projects/structurome_blencowe/ref/Homo_sapiens.GRCh38.dna.primary_assembly.fa --input samplesheet.example.tsv --outdir results -profile docker`
+`nextflow run main.nf --fasta /Volumes/lab-ulej/home/users/luscomben/users/iosubi/projects/structurome_blencowe/ref/Homo_sapiens.GRCh38.dna.primary_assembly.fa --fai /Volumes/lab-ulej/home/users/luscomben/users/iosubi/projects/structurome_blencowe/ref/Homo_sapiens.GRCh38.dna.primary_assembly.fa.fai --input samplesheet.example.tsv --outdir results -profile docker --chunk_size 10`
 
 #### Data flow with chunk matching
 ```

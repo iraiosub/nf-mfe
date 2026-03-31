@@ -1,7 +1,9 @@
 process PREPARE_BED {
     tag "${meta.id}_${chunk.baseName}"
     label 'process_low'
-    
+
+    container 'community.wave.seqera.io/library/bedtools_python:88ef333ca5f1123a'
+
     input:
     tuple val(meta), path(chunk)
     

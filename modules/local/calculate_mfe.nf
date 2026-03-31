@@ -1,17 +1,19 @@
 process CALCULATE_MFE {
     tag "${meta.id}_${chunk.baseName}"
-    label 'process_medium'
+    label 'process_low'
+
+    container 'community.wave.seqera.io/library/pandas_viennarna:d01fcc9dd6f10930'
 
     input:
     tuple val(meta), path(chunk), path(sequence_table)
 
     output:
-    tuple val(meta), path(chunk), path("${meta.id}_${chunk.baseName}_mfe.tsv"), emit: mfe
+    tuple val(meta), path("*_mfe.tsv"), emit: mfe
 
     script:
-    def prefix = "${meta.id}_${chunk.baseName}"
+    def prefix = "${chunk.baseName}"
     """
-    python mfe_chunk.py \\
+    mfe_chunk.py \\
         --input ${sequence_table} \\
         --output ${prefix}_mfe.tsv \\
         --processes ${task.cpus}

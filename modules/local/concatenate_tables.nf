@@ -1,12 +1,15 @@
 process CONCATENATE_TABLES {
     tag "${meta.id}"
+
+    container 'community.wave.seqera.io/library/bedtools_python:88ef333ca5f1123a'
+
     publishDir params.outdir, mode: 'copy'
     
     input:
     tuple val(meta), path(chunks)
     
     output:
-    tuple val(meta), path("${meta.id}_with_sequences.txt"), emit: final_table
+    tuple val(meta), path("${meta.id}_mfe.tsv"), emit: final_table
     
     script:
     """
@@ -18,13 +21,13 @@ process CONCATENATE_TABLES {
     sample_id = "${meta.id}"
     
     # Get all chunk files and sort them
-    chunk_files = sorted(glob.glob("*_with_sequences.txt"))
+    chunk_files = sorted(glob.glob("*_mfe.tsv"))
     
     if not chunk_files:
         print("Error: No chunk files found!")
         exit(1)
     
-    with open(f"{sample_id}_with_sequences.txt", 'w') as outfile:
+    with open(f"{sample_id}_mfe.tsv", 'w') as outfile:
         first_file = True
         
         for chunk_file in chunk_files:
@@ -41,6 +44,6 @@ process CONCATENATE_TABLES {
                 for line in infile:
                     outfile.write(line)
     
-    print(f"Concatenated {len(chunk_files)} chunks into {sample_id}_with_sequences.txt")
+    print(f"Concatenated {len(chunk_files)} chunks into {sample_id}_mfe.tsv")
     """
 }

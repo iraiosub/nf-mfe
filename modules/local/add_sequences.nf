@@ -2,6 +2,8 @@ process ADD_SEQUENCES {
     tag "${meta.id}_${chunk.baseName}"
     label 'process_low'
 
+    container 'community.wave.seqera.io/library/bedtools_python:88ef333ca5f1123a'
+
     input:
     tuple val(meta), path(chunk), path(left_fa), path(right_fa)
 
@@ -9,7 +11,7 @@ process ADD_SEQUENCES {
     tuple val(meta), path(chunk), path("*_sequences.tsv"), emit: sequence_table
 
     script:
-    def prefix = "${meta.id}_${chunk.baseName}"
+    def prefix = "${chunk.baseName}"
     """
     #!/usr/bin/env python3
 

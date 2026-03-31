@@ -1,10 +1,12 @@
-# Chimeric Interaction Sequence Extraction Pipeline
+# Chimeric Interaction Sequence Extraction and MFE Computation Pipeline
 
 ## This Nextflow pipeline processes chimeric interaction tables by:
 1. Splitting large tables into 10k row chunks (preserving headers)
 2. Extracting FASTA sequences for left and right coordinates using bedtools
 3. Adding extracted sequences as new columns (lseq, rseq)
-4. Concatenating all chunks back into a single table with one header
+4. Performing MFE calculation on the extracted sequences
+5. Optionally generating shuffled control sequences for MFE comparisons
+6. Concatenating all chunks back into a single table with one header
 
 ## Requirements
 
@@ -74,14 +76,14 @@ For each sample, the pipeline produces:
 Output columns include all original columns plus:
 - `lseq`: Extracted sequence for left coordinate (strand-aware)
 - `rseq`: Extracted sequence for right coordinate (strand-aware)
-- `mfe` :
-- `dot_bracket`
-- `mean_shuffled_mfe`
+- `mfe` : MFE (kcal/mol)
+- `dot_bracket`: Dot-bracket notation corresponding to the duplex
+- `mean_shuffled_mfe`: Mean MFE across shuffles
 - `sd_shuffled_mfe`
-- `delta_mfe`
+- `delta_mfe`: Difference between Observed MFE and the mean MFE across shuffles
 - `zscore_mfe`
 - `empirical_p_lower`
-- `n_shuffles_ok`
+- `n_shuffles_ok`: Number of shuffles for which MFE was succesfully computed
 
 
 ## Execution Profiles

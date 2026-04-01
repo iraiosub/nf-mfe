@@ -81,21 +81,22 @@ For each sample, the pipeline produces:
 Output columns include all original columns plus:
 - `lseq`: Extracted sequence for left coordinate (strand-aware)
 - `rseq`: Extracted sequence for right coordinate (strand-aware)
-- `mfe` : MFE (kcal/mol)
-- `dot_bracket`: Dot-bracket notation corresponding to the duplex
-- `mean_shuffled_mfe`: Mean MFE across shuffles
-- `sd_shuffled_mfe`
-- `delta_mfe`: Difference between Observed MFE and the mean MFE across shuffles
-- `zscore_mfe`
-- `empirical_p_lower`
-- `n_shuffles_ok`: Number of shuffles for which MFE was succesfully computed
+- `mfe` : Observed minimum free energy, MFE (kcal/mol)
+- `dot_bracket`: Dot-bracket representation of the predicted duplex structure for the observed lseq and rseq
 
-- `mfe_lseq_flipped`
-- `flipped_lseq_dot_bracket`
-- `flipped_lseq_pair`
-- `mfe_rseq_flipped`
-- `flipped_rseq_dot_bracket`
-- `flipped_rseq_pair`
+- `mean_shuffled_mfe`: Mean duplex MFE across all successfully evaluated shuffled sequence pairs
+- `sd_shuffled_mfe`: Standard deviation of duplex MFE across all successfully evaluated shuffled sequence pairs
+- `delta_mfe`: Observed MFE minus the mean shuffled MFE
+- `zscore_mfe`: Standardized difference between the observed MFE and the shuffled MFE distribution
+- `empirical_p_lower`: Empirical one-sided p-value for observing an MFE this low or lower relative to the shuffled null distribution
+- `n_shuffles_ok`: Number of shuffled sequence pairs for which duplex MFE was successfully computed
+
+- `mfe_lseq_flipped`: Duplex MFE after reversing lseq only and folding it against the original rseq
+- `flipped_lseq_dot_bracket`: Dot-bracket structure for the duplex formed by reversed lseq and original rseq
+- `flipped_lseq_pair`: The exact sequence pair used for that fold, formatted as `reversed_lseq&original_rseq`
+- `mfe_rseq_flipped`: Duplex MFE after reversing rseq only and folding it against the original lseq
+- `flipped_rseq_dot_bracket`: Dot-bracket structure for the duplex formed by original lseq and reversed rseq
+- `flipped_rseq_pair`: The exact sequence pair used for that fold, formatted as original_lseq&reversed_rseq
 
 
 ## Execution Profiles

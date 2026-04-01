@@ -269,10 +269,10 @@ def main():
     with PdfPages(pdf_path) as pdf:
         pdf.savefig(fig, bbox_inches="tight")
 
-        flipped_cols_present = {"mfe_lseq_reversed", "mfe_rseq_reversed"}.issubset(plot_df.columns)
+        flipped_cols_present = {"mfe_lseq_flipped", "mfe_rseq_flipped"}.issubset(plot_df.columns)
         if flipped_cols_present:
-            flip_l = plot_df["mfe_lseq_reversed"].astype(float).values
-            flip_r = plot_df["mfe_rseq_reversed"].astype(float).values
+            flip_l = plot_df["mfe_lseq_flipped"].astype(float).values
+            flip_r = plot_df["mfe_rseq_flipped"].astype(float).values
 
             delta_flip_l = flip_l - null_mean
             delta_flip_r = flip_r - null_mean

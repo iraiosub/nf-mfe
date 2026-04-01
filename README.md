@@ -68,9 +68,14 @@ nextflow run main.nf \
 
 ## Input File Format
 
-Input files should be tab-delimited with the following columns:
+Input files should be tab-delimited with the following required columns:
 ```
-lchr	ll	lr	lstrand	rchr	rl	rr	rstrand	name	mapq
+lchr	ll	lr	lstrand	rchr	rl	rr	rstrand	name
+```
+
+Optional columns:
+```
+mapq
 ```
 
 ## Output

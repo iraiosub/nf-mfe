@@ -25,13 +25,16 @@ process PREPARE_BED {
     
     with open(input_file, 'r') as f:
         reader = csv.DictReader(f, delimiter='\\t')
+        has_mapq = reader.fieldnames and 'mapq' in reader.fieldnames
         
         for row in reader:
+            score = row['mapq'] if has_mapq and row.get('mapq', '') else '0'
+
             # Left BED entry
-            left_bed.write(f"{row['lchr']}\\t{row['ll']}\\t{row['lr']}\\t{row['name']}\\t{row['mapq']}\\t{row['lstrand']}\\n")
+            left_bed.write(f"{row['lchr']}\\t{row['ll']}\\t{row['lr']}\\t{row['name']}\\t{score}\\t{row['lstrand']}\\n")
             
             # Right BED entry
-            right_bed.write(f"{row['rchr']}\\t{row['rl']}\\t{row['rr']}\\t{row['name']}\\t{row['mapq']}\\t{row['rstrand']}\\n")
+            right_bed.write(f"{row['rchr']}\\t{row['rl']}\\t{row['rr']}\\t{row['name']}\\t{score}\\t{row['rstrand']}\\n")
     
     left_bed.close()
     right_bed.close()

@@ -30,6 +30,8 @@ process ADD_SEQUENCES {
                 line = line.strip()
                 if line.startswith('>'):
                     if current_id:
+                        if current_id in sequences:
+                            raise ValueError(f"Duplicate sequence name found in FASTA: '{current_id}'. Names must be unique within each chunk for sequence merging.")
                         sequences[current_id] = ''.join(current_seq)
                     # Extract ID from header (remove '>' and strand info)
                     # bedtools -nameOnly adds strand as suffix: readID(+) or readID(-)
@@ -44,6 +46,8 @@ process ADD_SEQUENCES {
                     current_seq.append(line)
             
             if current_id:
+                if current_id in sequences:
+                    raise ValueError(f"Duplicate sequence name found in FASTA: '{current_id}'. Names must be unique within each chunk for sequence merging.")
                 sequences[current_id] = ''.join(current_seq)
         
         return sequences
@@ -63,6 +67,7 @@ process ADD_SEQUENCES {
     # Read input table and add sequence columns
     matched_count = 0
     total_count = 0
+    seen_ids = set()
     
     with open('${chunk}', 'r') as infile, \\
          open('${prefix}_sequences.tsv', 'w') as outfile:
@@ -77,6 +82,10 @@ process ADD_SEQUENCES {
         for row in reader:
             read_id = row['name']
             total_count += 1
+
+            if read_id in seen_ids:
+                raise ValueError(f"Duplicate name found in chunk '${chunk}': '{read_id}'. Names must be unique within each chunk for sequence merging.")
+            seen_ids.add(read_id)
             
             # DEBUG: Print first few IDs we're looking for
             if total_count <= 3:

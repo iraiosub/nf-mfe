@@ -5,8 +5,10 @@
 2. Extracting FASTA sequences for left and right coordinates using bedtools
 3. Adding extracted sequences as new columns (lseq, rseq)
 4. Performing MFE calculation on the extracted sequences ([RNAduplex](https://www.tbi.univie.ac.at/RNA/ViennaRNA/doc/html/man/RNAduplex.html))
-5. Optionally generating shuffled control sequences for MFE comparisons ([uShuffle](https://link.springer.com/article/10.1186/1471-2105-9-192))
-6. Concatenating all chunks back into a single table with one header
+5. Optionally generating shuffled control sequences for MFE comparisons ([uShuffle](https://link.springer.com/article/10.1186/1471-2105-9-192)) and/or flipped arm control (reversing one arm's sequence)
+6. Concatenating all chunks back into a single table with one header and plotting
+
+![Pipeline diagram](assets/mermaid-diagram.png)
 
 ## Requirements
 
@@ -15,7 +17,7 @@
 
 ## Quick Start
 
-> Important: we assume BED-style 0-based half-open coordinates are given in the input. 
+> Important: we assume BED-style 0-based half-open coordinates are given in the input.
 
 ### Option 1: Using a samplesheet
 
@@ -27,6 +29,7 @@ nextflow run main.nf \
   --chunk_size <n> \
   --shuffled_mfe \
   --n_shuffles <n> \
+  --flipped_arm_mfe \
   --outdir results
 ```
 
@@ -63,30 +66,44 @@ nextflow run main.nf \
 - `--shuffled_mfe`: Enable MFE calculations for shuffled control sequences (default: false)
 - `--n_shuffles`: Number of times the sequence is shuffled (default: 100)
 - `--klet_shuffles`: klet for sequence shuffling (default: 2)
+- `--flipped_arm_mfe`: Enable MFE calculations for flipped arm control sequences
 
 ## Input File Format
 
-Input files should be tab-delimited with the following columns:
+Input files should be tab-delimited with the following required columns:
 ```
-lchr	ll	lr	lstrand	rchr	rl	rr	rstrand	name	mapq
+lchr	ll	lr	lstrand	rchr	rl	rr	rstrand	name
+```
+
+Optional columns:
+```
+mapq
 ```
 
 ## Output
 
 For each sample, the pipeline produces:
-- `{sample_id}_with_sequences.txt`: Final table with added sequence columns
+- `{sample_id}_mfe.tsv`: Final table with added columns
 
 Output columns include all original columns plus:
 - `lseq`: Extracted sequence for left coordinate (strand-aware)
 - `rseq`: Extracted sequence for right coordinate (strand-aware)
-- `mfe` : MFE (kcal/mol)
-- `dot_bracket`: Dot-bracket notation corresponding to the duplex
-- `mean_shuffled_mfe`: Mean MFE across shuffles
-- `sd_shuffled_mfe`
-- `delta_mfe`: Difference between Observed MFE and the mean MFE across shuffles
-- `zscore_mfe`
-- `empirical_p_lower`
-- `n_shuffles_ok`: Number of shuffles for which MFE was succesfully computed
+- `mfe` : Observed minimum free energy, MFE (kcal/mol)
+- `dot_bracket`: Dot-bracket representation of the predicted duplex structure for the observed lseq and rseq
+
+- `mean_shuffled_mfe`: Mean duplex MFE across all successfully evaluated shuffled sequence pairs
+- `sd_shuffled_mfe`: Standard deviation of duplex MFE across all successfully evaluated shuffled sequence pairs
+- `delta_mfe`: Observed MFE minus the mean shuffled MFE
+- `zscore_mfe`: Standardized difference between the observed MFE and the shuffled MFE distribution
+- `empirical_p_lower`: Empirical one-sided p-value for observing an MFE this low or lower relative to the shuffled null distribution
+- `n_shuffles_ok`: Number of shuffled sequence pairs for which duplex MFE was successfully computed
+
+- `mfe_lseq_flipped`: Duplex MFE after reversing lseq only and folding it against the original rseq
+- `flipped_lseq_dot_bracket`: Dot-bracket structure for the duplex formed by reversed lseq and original rseq
+- `flipped_lseq_pair`: The exact sequence pair used for that fold, formatted as `reversed_lseq&original_rseq`
+- `mfe_rseq_flipped`: Duplex MFE after reversing rseq only and folding it against the original lseq
+- `flipped_rseq_dot_bracket`: Dot-bracket structure for the duplex formed by original lseq and reversed rseq
+- `flipped_rseq_pair`: The exact sequence pair used for that fold, formatted as original_lseq&reversed_rseq
 
 
 ## Execution Profiles
@@ -115,7 +132,7 @@ EXTRACT_SEQUENCES (bedtools getfasta -s)
     ↓
 ADD_SEQUENCES (add lseq, rseq columns)
     ↓
-CALCULATE_SHUFFLED_MFE or CALCULATE_SHUFFLED_MFE (MFE-related columns)
+CALCULATE_MFE or CALCULATE_MFE_CONTROLS (MFE-related columns)
     ↓
 CONCATENATE_TABLES (merge chunks)
     ↓
@@ -141,7 +158,9 @@ nextflow run main.nf \
 ### Settings for local testing
 `conda activate nfcore_tools_34`
 
-`nextflow run main.nf --fasta /Volumes/lab-ulej/home/users/luscomben/users/iosubi/projects/structurome_blencowe/ref/Homo_sapiens.GRCh38.dna.primary_assembly.fa --input samplesheet.example.tsv --outdir results -profile docker --chunk_size 10 -resume --fai /Volumes/lab-ulej/home/users/luscomben/users/iosubi/projects/structurome_blencowe/ref/Homo_sapiens.GRCh38.dna.primary_assembly.fa.fai --shuffled_mfe --n_shuffles 4`
+```
+nextflow run main.nf --fasta /Volumes/lab-ulej/home/users/luscomben/users/iosubi/projects/structurome_blencowe/ref/Homo_sapiens.GRCh38.dna.primary_assembly.fa --input ./data/samplesheet.tsv --outdir results -profile docker --chunk_size 10 -resume --fai /Volumes/lab-ulej/home/users/luscomben/users/iosubi/projects/structurome_blencowe/ref/Homo_sapiens.GRCh38.dna.primary_assembly.fa.fai --shuffled_mfe --n_shuffles 5 --flipped_arm_mfe
+```
 
 #### Data flow with chunk matching
 ```

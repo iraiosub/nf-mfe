@@ -16,7 +16,7 @@ include { PREPARE_BED } from './modules/local/prepare_bed'
 include { EXTRACT_SEQUENCES } from './modules/local/extract_sequences'
 include { ADD_SEQUENCES } from './modules/local/add_sequences'
 include { CALCULATE_MFE } from './modules/local/calculate_mfe'
-include { CALCULATE_SHUFFLED_MFE } from './modules/local/calculate_shuffled_mfe'
+include { CALCULATE_MFE_CONTROLS } from './modules/local/calculate_mfe_controls'
 include { CONCATENATE_TABLES } from './modules/local/concatenate_tables'
 include { PLOT_MFE_SUMMARY } from './modules/local/plot_mfe_summary'
 
@@ -79,14 +79,16 @@ workflow {
     ADD_SEQUENCES(EXTRACT_SEQUENCES.out.sequences)
 
     // Step 5: Calculate MFE
-    if (!params.shuffled_mfe) {
+    def run_controls = params.shuffled_mfe || params.flipped_arm_mfe
+
+    if (!run_controls) {
 
         CALCULATE_MFE(ADD_SEQUENCES.out.sequence_table)
         ch_mfe = CALCULATE_MFE.out.mfe
 
     } else {
-        CALCULATE_SHUFFLED_MFE(ADD_SEQUENCES.out.sequence_table)
-        ch_mfe = CALCULATE_SHUFFLED_MFE.out.shuffled_mfe
+        CALCULATE_MFE_CONTROLS(ADD_SEQUENCES.out.sequence_table)
+        ch_mfe = CALCULATE_MFE_CONTROLS.out.mfe
 
     }
 
@@ -96,7 +98,7 @@ workflow {
     CONCATENATE_TABLES(ch_grouped)
 
     // Step 7: Plot concatenated shuffled-MFE tables
-    if (params.shuffled_mfe) {
+    if (run_controls) {
         PLOT_MFE_SUMMARY(CONCATENATE_TABLES.out.final_table)
     }
 

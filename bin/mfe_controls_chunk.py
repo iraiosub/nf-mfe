@@ -10,6 +10,13 @@ import pandas as pd
 import RNA
 
 
+def normalize_sequence(sequence):
+    if pd.isna(sequence):
+        return None
+    sequence = str(sequence).strip().upper().replace("T", "U")
+    return sequence if sequence else None
+
+
 def compute_mfe(pair):
     """
     Compute RNA-RNA duplex MFE for one sequence pair.
@@ -18,11 +25,8 @@ def compute_mfe(pair):
     """
     lseq, rseq = pair
 
-    if pd.isna(lseq) or pd.isna(rseq):
-        return (None, None)
-
-    lseq = str(lseq).strip().upper().replace("T", "U")
-    rseq = str(rseq).strip().upper().replace("T", "U")
+    lseq = normalize_sequence(lseq)
+    rseq = normalize_sequence(rseq)
 
     if not lseq or not rseq:
         return (None, None)
@@ -32,6 +36,16 @@ def compute_mfe(pair):
         return (duplex.energy, duplex.structure)
     except Exception:
         return (None, None)
+
+
+def reverse_sequence(sequence):
+    """
+    Reverse sequence string only. Does not complement.
+    """
+    sequence = normalize_sequence(sequence)
+    if not sequence:
+        return None
+    return sequence[::-1]
 
 
 def shuffle_sequence(sequence, number=100, klet=2, seed=42):
@@ -139,6 +153,15 @@ def main():
         default="\t",
         help="Input/output delimiter (default: tab)"
     )
+    parser.add_argument(
+        "--flipped-arm-mfe",
+        action="store_true",
+        help=(
+            "Compute additional MFEs with one arm reversed at a time: "
+            "reverse lseq only, and reverse rseq only. "
+            "Results are saved to summary output columns only."
+        )
+    )
     args = parser.parse_args()
 
     print(f"Loading: {args.input}")
@@ -162,6 +185,36 @@ def main():
             observed_results = list(ex.map(compute_mfe, pairs, chunksize=200))
         df["mfe"] = [r[0] for r in observed_results]
         df["dot_bracket"] = [r[1] for r in observed_results]
+
+    if args.flipped_arm_mfe:
+        print("Computing flipped-arm MFEs (reverse lseq only; reverse rseq only)...")
+
+        left_reversed_pairs = [
+            (reverse_sequence(lseq), normalize_sequence(rseq))
+            for lseq, rseq in zip(df["lseq"], df["rseq"])
+        ]
+        right_reversed_pairs = [
+            (normalize_sequence(lseq), reverse_sequence(rseq))
+            for lseq, rseq in zip(df["lseq"], df["rseq"])
+        ]
+
+        with ProcessPoolExecutor(max_workers=args.processes) as ex:
+            left_reversed_results = list(ex.map(compute_mfe, left_reversed_pairs, chunksize=200))
+            right_reversed_results = list(ex.map(compute_mfe, right_reversed_pairs, chunksize=200))
+
+        df["mfe_lseq_flipped"] = [r[0] for r in left_reversed_results]
+        df["flipped_lseq_dot_bracket"] = [r[1] for r in left_reversed_results]
+        df["flipped_lseq_pair"] = [
+            None if (l is None or r is None) else f"{l}&{r}"
+            for l, r in left_reversed_pairs
+        ]
+
+        df["mfe_rseq_flipped"] = [r[0] for r in right_reversed_results]
+        df["flipped_rseq_dot_bracket"] = [r[1] for r in right_reversed_results]
+        df["flipped_rseq_pair"] = [
+            None if (l is None or r is None) else f"{l}&{r}"
+            for l, r in right_reversed_pairs
+        ]
 
     print(f"Computing shuffled MFEs for {len(df):,} rows with {args.n_shuffles} shuffles per row...")
 
@@ -207,13 +260,14 @@ def main():
                 n_pairs = min(len(left_shuffles), len(right_shuffles))
                 if n_pairs == 0:
                     stats = summarize_null(obs_mfe, [])
-                    summary_rows.append({
+                    summary_row = {
                         "row_id": row_id,
                         "name": name,
                         "mfe": obs_mfe,
                         "dot_bracket": obs_db,
                         **stats
-                    })
+                    }
+                    summary_rows.append(summary_row)
                     continue
 
                 pairs = list(zip(left_shuffles[:n_pairs], right_shuffles[:n_pairs]))
@@ -233,13 +287,14 @@ def main():
                     null_mfes.append(mfe_shuffle)
 
                 stats = summarize_null(obs_mfe, null_mfes)
-                summary_rows.append({
+                summary_row = {
                     "row_id": row_id,
                     "name": name,
                     "mfe": obs_mfe,
                     "dot_bracket": obs_db,
                     **stats
-                })
+                }
+                summary_rows.append(summary_row)
 
     summary_df = pd.DataFrame(summary_rows)
 

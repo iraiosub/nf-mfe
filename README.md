@@ -6,7 +6,9 @@
 3. Adding extracted sequences as new columns (lseq, rseq)
 4. Performing MFE calculation on the extracted sequences ([RNAduplex](https://www.tbi.univie.ac.at/RNA/ViennaRNA/doc/html/man/RNAduplex.html))
 5. Optionally generating shuffled control sequences for MFE comparisons ([uShuffle](https://link.springer.com/article/10.1186/1471-2105-9-192)) and/or flipped arm control (reversing one arm's sequence)
-6. Concatenating all chunks back into a single table with one header
+6. Concatenating all chunks back into a single table with one header and plotting
+
+![Pipeline diagram](assets/mermaid-diagram.png)
 
 ## Requirements
 
@@ -130,7 +132,7 @@ EXTRACT_SEQUENCES (bedtools getfasta -s)
     ↓
 ADD_SEQUENCES (add lseq, rseq columns)
     ↓
-CALCULATE_SHUFFLED_MFE or CALCULATE_SHUFFLED_MFE (MFE-related columns)
+CALCULATE_MFE or CALCULATE_MFE_CONTROLS (MFE-related columns)
     ↓
 CONCATENATE_TABLES (merge chunks)
     ↓

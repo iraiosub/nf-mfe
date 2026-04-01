@@ -8,8 +8,8 @@ process PLOT_MFE_SUMMARY {
     tuple val(meta), path(final_table)
 
     output:
-    tuple val(meta), path("${meta.id}.mfe_summary_plots.png"), emit: png
-    tuple val(meta), path("${meta.id}.mfe_summary_plots.pdf"), emit: pdf
+    tuple val(meta), path("*summary_plots.png"), emit: png
+    tuple val(meta), path("*summary_plots.pdf"), emit: pdf
     tuple val(meta), path("${meta.id}.mfe_summary_stats.tsv"), emit: stats
 
     script:

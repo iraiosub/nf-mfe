@@ -310,11 +310,11 @@ def main():
             if len(flip_l_valid):
                 x, y = ecdf(flip_l_valid)
                 ax.plot(x, y, linewidth=2, color="C0", label="Reverse lseq MFE")
-                ax.axvline(np.nanmedian(flip_l_valid), linestyle="--", linewidth=1.5, color="C0")
+                # ax.axvline(np.nanmedian(flip_l_valid), linestyle="--", linewidth=1.5, color="C0")
             if len(flip_r_valid):
                 x, y = ecdf(flip_r_valid)
                 ax.plot(x, y, linewidth=2, color="C1", label="Reverse rseq MFE")
-                ax.axvline(np.nanmedian(flip_r_valid), linestyle="--", linewidth=1.5, color="C1")
+                # ax.axvline(np.nanmedian(flip_r_valid), linestyle="--", linewidth=1.5, color="C1")
             ax.axvline(0, linestyle=":", linewidth=1.5, color="gray")
             ax.set_title("Flipped ECDF")
             ax.set_xlabel("MFE (kcal/mol)")

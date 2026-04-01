@@ -13,13 +13,16 @@ process CALCULATE_SHUFFLED_MFE {
 
     script:
     def prefix = "${chunk.baseName}"
+    def flipped_arg = params.flipped_arm_mfe ? '--flipped-arm-mfe' : ''
+
     """
-    mfe_shuffle_chunk.py \
-        --input ${mfe_table} \
-        --output-summary ${prefix}_shuffled_mfe.tsv \
-        --output-detail ${prefix}_shuffled_mfe_all.tsv \
-        --processes ${task.cpus} \
-        --n-shuffles ${params.n_shuffles} \
-        --klet ${params.klet_shuffles}
+    mfe_shuffle_chunk.py \\
+        --input ${mfe_table} \\
+        --output-summary ${prefix}_shuffled_mfe.tsv \\
+        --output-detail ${prefix}_shuffled_mfe_all.tsv \\
+        --processes ${task.cpus} \\
+        --n-shuffles ${params.n_shuffles} \\
+        --klet ${params.klet_shuffles} \\
+        ${flipped_arg}
     """
 }

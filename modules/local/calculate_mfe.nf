@@ -16,6 +16,7 @@ process CALCULATE_MFE {
     mfe_chunk.py \\
         --input ${sequence_table} \\
         --output ${prefix}_mfe.tsv \\
-        --processes ${task.cpus}
+        --processes ${task.cpus} \\
+        --flipped_arm_mfe
     """
 }

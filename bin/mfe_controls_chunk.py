@@ -267,13 +267,6 @@ def main():
                         "dot_bracket": obs_db,
                         **stats
                     }
-                    if args.flipped_arm_mfe:
-                        summary_row["mfe_lseq_flipped"] = row.get("mfe_lseq_flipped")
-                        summary_row["flipped_lseq_dot_bracket"] = row.get("flipped_lseq_dot_bracket")
-                        summary_row["flipped_lseq_pair"] = row.get("flipped_lseq_pair")
-                        summary_row["mfe_rseq_flipped"] = row.get("mfe_rseq_flipped")
-                        summary_row["flipped_rseq_dot_bracket"] = row.get("flipped_rseq_dot_bracket")
-                        summary_row["flipped_rseq_pair"] = row.get("flipped_rseq_pair")
                     summary_rows.append(summary_row)
                     continue
 
@@ -301,13 +294,6 @@ def main():
                     "dot_bracket": obs_db,
                     **stats
                 }
-                if args.flipped_arm_mfe:
-                    summary_row["mfe_lseq_flipped"] = row.get("mfe_lseq_flipped")
-                    summary_row["flipped_lseq_dot_bracket"] = row.get("flipped_lseq_dot_bracket")
-                    summary_row["flipped_lseq_pair"] = row.get("flipped_lseq_pair")
-                    summary_row["mfe_rseq_flipped"] = row.get("mfe_rseq_flipped")
-                    summary_row["flipped_rseq_dot_bracket"] = row.get("flipped_rseq_dot_bracket")
-                    summary_row["flipped_rseq_pair"] = row.get("flipped_rseq_pair")
                 summary_rows.append(summary_row)
 
     summary_df = pd.DataFrame(summary_rows)

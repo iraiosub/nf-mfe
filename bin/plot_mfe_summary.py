@@ -98,6 +98,20 @@ def add_median_and_landmark_legend(ax, series_handles=None, median_label="Median
     ax.legend(handles=handles, labels=labels)
 
 
+def pick_column(df, base_name):
+    """
+    Select a column by preferred name, with compatibility for pandas merge suffixes.
+    Prefer unsuffixed, then '_y', then '_x'.
+    """
+    if base_name in df.columns:
+        return base_name
+    if f"{base_name}_y" in df.columns:
+        return f"{base_name}_y"
+    if f"{base_name}_x" in df.columns:
+        return f"{base_name}_x"
+    return None
+
+
 def main():
     parser = argparse.ArgumentParser(description="Plot observed vs shuffled MFE summary distributions.")
     parser.add_argument("--input", required=True, help="Input summary TSV from shuffled MFE script")
@@ -269,10 +283,12 @@ def main():
     with PdfPages(pdf_path) as pdf:
         pdf.savefig(fig, bbox_inches="tight")
 
-        flipped_cols_present = {"mfe_lseq_flipped", "mfe_rseq_flipped"}.issubset(plot_df.columns)
+        flip_l_col = pick_column(plot_df, "mfe_lseq_flipped")
+        flip_r_col = pick_column(plot_df, "mfe_rseq_flipped")
+        flipped_cols_present = flip_l_col is not None and flip_r_col is not None
         if flipped_cols_present:
-            flip_l = plot_df["mfe_lseq_flipped"].astype(float).values
-            flip_r = plot_df["mfe_rseq_flipped"].astype(float).values
+            flip_l = plot_df[flip_l_col].astype(float).values
+            flip_r = plot_df[flip_r_col].astype(float).values
 
             delta_flip_l = flip_l - null_mean
             delta_flip_r = flip_r - null_mean
@@ -358,6 +374,8 @@ def main():
             flipped_pdf_path = outdir / f"{sample_name}.flipped_mfe_summary_plots.pdf"
 
             fig2.savefig(flipped_png_path, dpi=300, bbox_inches="tight")
+            with PdfPages(flipped_pdf_path) as flipped_pdf:
+                flipped_pdf.savefig(fig2, bbox_inches="tight")
             pdf.savefig(fig2, bbox_inches="tight")
             plt.close(fig2)
 

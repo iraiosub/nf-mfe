@@ -5,7 +5,7 @@
 2. Extracting FASTA sequences for left and right coordinates using bedtools
 3. Adding extracted sequences as new columns (lseq, rseq)
 4. Performing MFE calculation on the extracted sequences ([RNAduplex](https://www.tbi.univie.ac.at/RNA/ViennaRNA/doc/html/man/RNAduplex.html))
-5. Optionally generating shuffled control sequences for MFE comparisons ([uShuffle](https://link.springer.com/article/10.1186/1471-2105-9-192))
+5. Optionally generating shuffled control sequences for MFE comparisons ([uShuffle](https://link.springer.com/article/10.1186/1471-2105-9-192)) and/or flipped arm control (reversing one arm's sequence)
 6. Concatenating all chunks back into a single table with one header
 
 ## Requirements
@@ -15,7 +15,7 @@
 
 ## Quick Start
 
-> Important: we assume BED-style 0-based half-open coordinates are given in the input. 
+> Important: we assume BED-style 0-based half-open coordinates are given in the input.
 
 ### Option 1: Using a samplesheet
 
@@ -27,6 +27,7 @@ nextflow run main.nf \
   --chunk_size <n> \
   --shuffled_mfe \
   --n_shuffles <n> \
+  --flipped_arm_mfe \
   --outdir results
 ```
 
@@ -63,6 +64,7 @@ nextflow run main.nf \
 - `--shuffled_mfe`: Enable MFE calculations for shuffled control sequences (default: false)
 - `--n_shuffles`: Number of times the sequence is shuffled (default: 100)
 - `--klet_shuffles`: klet for sequence shuffling (default: 2)
+- `--flipped_arm_mfe`: Enable MFE calculations for flipped arm control sequences
 
 ## Input File Format
 
@@ -87,6 +89,13 @@ Output columns include all original columns plus:
 - `zscore_mfe`
 - `empirical_p_lower`
 - `n_shuffles_ok`: Number of shuffles for which MFE was succesfully computed
+
+- `mfe_lseq_flipped`
+- `flipped_lseq_dot_bracket`
+- `flipped_lseq_pair`
+- `mfe_rseq_flipped`
+- `flipped_rseq_dot_bracket`
+- `flipped_rseq_pair`
 
 
 ## Execution Profiles

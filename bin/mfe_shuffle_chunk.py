@@ -202,14 +202,14 @@ def main():
             left_reversed_results = list(ex.map(compute_mfe, left_reversed_pairs, chunksize=200))
             right_reversed_results = list(ex.map(compute_mfe, right_reversed_pairs, chunksize=200))
 
-        df["mfe_lseq_reversed"] = [r[0] for r in left_reversed_results]
+        df["mfe_lseq_flipped"] = [r[0] for r in left_reversed_results]
         df["flipped_lseq_dot_bracket"] = [r[1] for r in left_reversed_results]
         df["flipped_lseq_pair"] = [
             None if (l is None or r is None) else f"{l}&{r}"
             for l, r in left_reversed_pairs
         ]
 
-        df["mfe_rseq_reversed"] = [r[0] for r in right_reversed_results]
+        df["mfe_rseq_flipped"] = [r[0] for r in right_reversed_results]
         df["flipped_rseq_dot_bracket"] = [r[1] for r in right_reversed_results]
         df["flipped_rseq_pair"] = [
             None if (l is None or r is None) else f"{l}&{r}"
@@ -268,10 +268,10 @@ def main():
                         **stats
                     }
                     if args.flipped_arm_mfe:
-                        summary_row["mfe_lseq_reversed"] = row.get("mfe_lseq_reversed")
+                        summary_row["mfe_lseq_flipped"] = row.get("mfe_lseq_flipped")
                         summary_row["flipped_lseq_dot_bracket"] = row.get("flipped_lseq_dot_bracket")
                         summary_row["flipped_lseq_pair"] = row.get("flipped_lseq_pair")
-                        summary_row["mfe_rseq_reversed"] = row.get("mfe_rseq_reversed")
+                        summary_row["mfe_rseq_flipped"] = row.get("mfe_rseq_flipped")
                         summary_row["flipped_rseq_dot_bracket"] = row.get("flipped_rseq_dot_bracket")
                         summary_row["flipped_rseq_pair"] = row.get("flipped_rseq_pair")
                     summary_rows.append(summary_row)
@@ -302,10 +302,10 @@ def main():
                     **stats
                 }
                 if args.flipped_arm_mfe:
-                    summary_row["mfe_lseq_reversed"] = row.get("mfe_lseq_reversed")
+                    summary_row["mfe_lseq_flipped"] = row.get("mfe_lseq_flipped")
                     summary_row["flipped_lseq_dot_bracket"] = row.get("flipped_lseq_dot_bracket")
                     summary_row["flipped_lseq_pair"] = row.get("flipped_lseq_pair")
-                    summary_row["mfe_rseq_reversed"] = row.get("mfe_rseq_reversed")
+                    summary_row["mfe_rseq_flipped"] = row.get("mfe_rseq_flipped")
                     summary_row["flipped_rseq_dot_bracket"] = row.get("flipped_rseq_dot_bracket")
                     summary_row["flipped_rseq_pair"] = row.get("flipped_rseq_pair")
                 summary_rows.append(summary_row)

@@ -76,7 +76,7 @@ lchr	ll	lr	lstrand	rchr	rl	rr	rstrand	name	mapq
 ## Output
 
 For each sample, the pipeline produces:
-- `{sample_id}_with_sequences.txt`: Final table with added sequence columns
+- `{sample_id}_mfe.tsv`: Final table with added columns
 
 Output columns include all original columns plus:
 - `lseq`: Extracted sequence for left coordinate (strand-aware)
@@ -151,7 +151,7 @@ nextflow run main.nf \
 ### Settings for local testing
 `conda activate nfcore_tools_34`
 
-`nextflow run main.nf --fasta /Volumes/lab-ulej/home/users/luscomben/users/iosubi/projects/structurome_blencowe/ref/Homo_sapiens.GRCh38.dna.primary_assembly.fa --input samplesheet.example.tsv --outdir results -profile docker --chunk_size 10 -resume --fai /Volumes/lab-ulej/home/users/luscomben/users/iosubi/projects/structurome_blencowe/ref/Homo_sapiens.GRCh38.dna.primary_assembly.fa.fai --shuffled_mfe --n_shuffles 4`
+`nextflow run main.nf --fasta /Volumes/lab-ulej/home/users/luscomben/users/iosubi/projects/structurome_blencowe/ref/Homo_sapiens.GRCh38.dna.primary_assembly.fa --input ./data/samplesheet.tsv --outdir results -profile docker --chunk_size 10 -resume --fai /Volumes/lab-ulej/home/users/luscomben/users/iosubi/projects/structurome_blencowe/ref/Homo_sapiens.GRCh38.dna.primary_assembly.fa.fai --shuffled_mfe --n_shuffles 5`
 
 #### Data flow with chunk matching
 ```

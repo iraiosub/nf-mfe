@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
+from matplotlib.lines import Line2D
 
 try:
     from scipy.stats import gaussian_kde, wilcoxon
@@ -78,6 +79,23 @@ def safe_wilcoxon(x, y):
         return stat, p
     except Exception:
         return np.nan, np.nan
+
+
+def add_median_and_landmark_legend(ax, series_handles=None, median_label="Median", landmark_label="Landmark"):
+    handles = []
+    labels = []
+
+    if series_handles:
+        handles.extend(series_handles)
+        labels.extend([h.get_label() for h in series_handles])
+
+    handles.append(Line2D([0], [0], color="black", linestyle="--", linewidth=1.5, label=median_label))
+    labels.append(median_label)
+
+    handles.append(Line2D([0], [0], color="black", linestyle=":", linewidth=1.5, label=landmark_label))
+    labels.append(landmark_label)
+
+    ax.legend(handles=handles, labels=labels)
 
 
 def main():
@@ -190,8 +208,10 @@ def main():
     x2, y2 = ecdf(null_mean)
     if len(x1):
         ax.plot(x1, y1, linewidth=2, label="Observed MFE")
+        ax.axvline(np.nanmedian(obs), linestyle="--", linewidth=1.5, color="C0")
     if len(x2):
         ax.plot(x2, y2, linewidth=2, label="Mean shuffled MFE")
+        ax.axvline(np.nanmedian(null_mean), linestyle="--", linewidth=1.5, color="C1")
     ax.set_title(f"ECDF (n={n_paired:,})")
     ax.set_xlabel("MFE (kcal/mol)")
     ax.set_ylabel("Cumulative fraction")
@@ -201,8 +221,8 @@ def main():
     delta_valid = delta[np.isfinite(delta)]
     if len(delta_valid):
         density_line(ax, delta_valid, "Delta MFE", color="gray")
-        ax.axvline(0, linestyle="--", linewidth=1.5, color="gray")
-        ax.axvline(np.nanmedian(delta_valid), linestyle=":", linewidth=1.5, color="gray")
+        ax.axvline(np.nanmedian(delta_valid), linestyle="--", linewidth=1.5, color="gray")
+        ax.axvline(0, linestyle=":", linewidth=1.5, color="gray")
     ax.set_title(f"Delta MFE distribution (n={len(delta_valid):,})")
     ax.set_xlabel("delta_mfe = observed - mean_shuffled")
     ax.set_ylabel("Density")
@@ -213,8 +233,8 @@ def main():
     if len(p_valid):
         bins = np.linspace(0, 1, 41)
         ax.hist(p_valid, bins=bins, edgecolor="black", linewidth=0.6, color="gray")
-        ax.axvline(0.05, linestyle="--", linewidth=1.5, color="gray")
-        ax.axvline(0.01, linestyle=":", linewidth=1.5, color="gray")
+        ax.axvline(0.05, linestyle=":", linewidth=1.5, color="gray")
+        ax.axvline(0.01, linestyle=":", linewidth=1.5, color="black")
     ax.set_title(f"Empirical p-value distribution (n={len(p_valid):,})")
     ax.set_xlabel("empirical_p_lower")
     ax.set_ylabel("Count")
@@ -223,8 +243,8 @@ def main():
     z_valid = z[np.isfinite(z)]
     if len(z_valid):
         density_line(ax, z_valid, "Z-score", color="gray")
-        ax.axvline(0, linestyle="--", linewidth=1.5, color="gray")
-        ax.axvline(np.nanmedian(z_valid), linestyle=":", linewidth=1.5, color="gray")
+        ax.axvline(np.nanmedian(z_valid), linestyle="--", linewidth=1.5, color="gray")
+        ax.axvline(0, linestyle=":", linewidth=1.5, color="gray")
     ax.set_title(f"Z-score distribution (n={len(z_valid):,})")
     ax.set_xlabel("zscore_mfe")
     ax.set_ylabel("Density")
@@ -235,19 +255,115 @@ def main():
         ax.scatter(null_paired, obs_paired, s=12, alpha=0.2, color="gray")
         lo = np.nanmin([obs_paired.min(), null_paired.min()])
         hi = np.nanmax([obs_paired.max(), null_paired.max()])
-        ax.plot([lo, hi], [lo, hi], linestyle="--", linewidth=1.5, color="gray")
+        ax.plot([lo, hi], [lo, hi], linestyle=":", linewidth=1.5, color="gray")
     ax.set_title(f"Observed vs shuffled mean (n={n_paired:,})")
     ax.set_xlabel("Mean shuffled MFE")
     ax.set_ylabel("Observed MFE")
 
     fig.tight_layout(rect=(0, 0.04, 1, 0.96))
 
-    png_path = outdir / f"{sample_name}.mfe_summary_plots.png"
-    pdf_path = outdir / f"{sample_name}.mfe_summary_plots.pdf"
+    png_path = outdir / f"{sample_name}.shuffled_mfe_summary_plots.png"
+    pdf_path = outdir / f"{sample_name}.shuffled_mfe_summary_plots.pdf"
 
     fig.savefig(png_path, dpi=300, bbox_inches="tight")
     with PdfPages(pdf_path) as pdf:
         pdf.savefig(fig, bbox_inches="tight")
+
+        flipped_cols_present = {"mfe_lseq_reversed", "mfe_rseq_reversed"}.issubset(plot_df.columns)
+        if flipped_cols_present:
+            flip_l = plot_df["mfe_lseq_reversed"].astype(float).values
+            flip_r = plot_df["mfe_rseq_reversed"].astype(float).values
+
+            delta_flip_l = flip_l - null_mean
+            delta_flip_r = flip_r - null_mean
+
+            flip_l_valid = flip_l[np.isfinite(flip_l)]
+            flip_r_valid = flip_r[np.isfinite(flip_r)]
+            delta_flip_l_valid = delta_flip_l[np.isfinite(delta_flip_l)]
+            delta_flip_r_valid = delta_flip_r[np.isfinite(delta_flip_r)]
+
+            fig2, axes2 = plt.subplots(1, 3, figsize=(18, 5))
+            fig2.suptitle(f"{sample_name}: flipped-arm MFE summary", fontsize=18, y=0.98)
+
+            ax = axes2[0]
+            density_line(ax, flip_l_valid, "Reverse lseq MFE", color="C0")
+            density_line(ax, flip_r_valid, "Reverse rseq MFE", color="C1")
+            if len(flip_l_valid):
+                ax.axvline(np.nanmedian(flip_l_valid), linestyle="--", linewidth=1.5, color="C0")
+            if len(flip_r_valid):
+                ax.axvline(np.nanmedian(flip_r_valid), linestyle="--", linewidth=1.5, color="C1")
+            ax.axvline(0, linestyle=":", linewidth=1.5, color="gray")
+            ax.set_title(f"Flipped arm density (nL={len(flip_l_valid):,}, nR={len(flip_r_valid):,})")
+            ax.set_xlabel("MFE (kcal/mol)")
+            ax.set_ylabel("Density")
+            add_median_and_landmark_legend(
+                ax,
+                series_handles=[
+                    Line2D([0], [0], color="C0", linewidth=2, label="Reverse lseq MFE"),
+                    Line2D([0], [0], color="C1", linewidth=2, label="Reverse rseq MFE"),
+                ],
+                median_label="Median",
+                landmark_label="0 landmark",
+            )
+
+            ax = axes2[1]
+            if len(flip_l_valid):
+                x, y = ecdf(flip_l_valid)
+                ax.plot(x, y, linewidth=2, color="C0", label="Reverse lseq MFE")
+                ax.axvline(np.nanmedian(flip_l_valid), linestyle="--", linewidth=1.5, color="C0")
+            if len(flip_r_valid):
+                x, y = ecdf(flip_r_valid)
+                ax.plot(x, y, linewidth=2, color="C1", label="Reverse rseq MFE")
+                ax.axvline(np.nanmedian(flip_r_valid), linestyle="--", linewidth=1.5, color="C1")
+            ax.axvline(0, linestyle=":", linewidth=1.5, color="gray")
+            ax.set_title("Flipped ECDF")
+            ax.set_xlabel("MFE (kcal/mol)")
+            ax.set_ylabel("Cumulative fraction")
+            add_median_and_landmark_legend(
+                ax,
+                series_handles=[
+                    Line2D([0], [0], color="C0", linewidth=2, label="Reverse lseq MFE"),
+                    Line2D([0], [0], color="C1", linewidth=2, label="Reverse rseq MFE"),
+                ],
+                median_label="Median",
+                landmark_label="0 landmark",
+            )
+
+            ax = axes2[2]
+            density_line(ax, delta_flip_l_valid, "Delta reverse lseq", color="C0")
+            density_line(ax, delta_flip_r_valid, "Delta reverse rseq", color="C1")
+            if len(delta_flip_l_valid):
+                ax.axvline(np.nanmedian(delta_flip_l_valid), linestyle="--", linewidth=1.5, color="C0")
+            if len(delta_flip_r_valid):
+                ax.axvline(np.nanmedian(delta_flip_r_valid), linestyle="--", linewidth=1.5, color="C1")
+            ax.axvline(0, linestyle=":", linewidth=1.5, color="gray")
+            ax.set_title(
+                f"Flipped delta MFE (nL={len(delta_flip_l_valid):,}, nR={len(delta_flip_r_valid):,})"
+            )
+            ax.set_xlabel("delta_mfe = flipped - mean_shuffled")
+            ax.set_ylabel("Density")
+            add_median_and_landmark_legend(
+                ax,
+                series_handles=[
+                    Line2D([0], [0], color="C0", linewidth=2, label="Delta reverse lseq"),
+                    Line2D([0], [0], color="C1", linewidth=2, label="Delta reverse rseq"),
+                ],
+                median_label="Median",
+                landmark_label="0 landmark",
+            )
+
+            fig2.tight_layout(rect=(0, 0.02, 1, 0.93))
+
+            flipped_png_path = outdir / f"{sample_name}.flipped_mfe_summary_plots.png"
+            flipped_pdf_path = outdir / f"{sample_name}.flipped_mfe_summary_plots.pdf"
+
+            fig2.savefig(flipped_png_path, dpi=300, bbox_inches="tight")
+            pdf.savefig(fig2, bbox_inches="tight")
+            plt.close(fig2)
+
+            print(f"Wrote plots: {flipped_png_path}")
+            print(f"Wrote plots: {flipped_pdf_path}")
+
     plt.close(fig)
 
     print(f"Wrote plots: {png_path}")

@@ -206,30 +206,48 @@ def main():
     fig.suptitle(f"{sample_name}: observed vs shuffled MFE summary", fontsize=18, y=0.98)
 
     ax = axes[0, 0]
-    density_line(ax, obs, "Observed MFE")
-    density_line(ax, null_mean, "Mean shuffled MFE")
+    density_line(ax, obs, "Observed MFE", color="C0")
+    density_line(ax, null_mean, "Mean shuffled MFE", color="C1")
     obs_median = np.nanmedian(obs)
     null_median = np.nanmedian(null_mean)
     ax.axvline(obs_median, linestyle="--", linewidth=1.5, color="C0")
     ax.axvline(null_median, linestyle="--", linewidth=1.5, color="C1")
+    ax.axvline(0, linestyle=":", linewidth=1.5, color="gray")
     ax.set_title(f"Density (n={n_paired:,})")
     ax.set_xlabel("MFE (kcal/mol)")
     ax.set_ylabel("Density")
-    ax.legend()
+    add_median_and_landmark_legend(
+        ax,
+        series_handles=[
+            Line2D([0], [0], color="C0", linewidth=2, label="Observed MFE"),
+            Line2D([0], [0], color="C1", linewidth=2, label="Mean shuffled MFE"),
+        ],
+        median_label="Median",
+        landmark_label="0 landmark",
+    )
 
     ax = axes[0, 1]
     x1, y1 = ecdf(obs)
     x2, y2 = ecdf(null_mean)
     if len(x1):
-        ax.plot(x1, y1, linewidth=2, label="Observed MFE")
-        # ax.axvline(np.nanmedian(obs), linestyle="--", linewidth=1.5, color="C0")
+        ax.plot(x1, y1, linewidth=2, color="C0", label="Observed MFE")
+        ax.axvline(np.nanmedian(obs), linestyle="--", linewidth=1.5, color="C0")
     if len(x2):
-        ax.plot(x2, y2, linewidth=2, label="Mean shuffled MFE")
-        # ax.axvline(np.nanmedian(null_mean), linestyle="--", linewidth=1.5, color="C1")
+        ax.plot(x2, y2, linewidth=2, color="C1", label="Mean shuffled MFE")
+        ax.axvline(np.nanmedian(null_mean), linestyle="--", linewidth=1.5, color="C1")
+    ax.axvline(0, linestyle=":", linewidth=1.5, color="gray")
     ax.set_title(f"ECDF (n={n_paired:,})")
     ax.set_xlabel("MFE (kcal/mol)")
     ax.set_ylabel("Cumulative fraction")
-    ax.legend()
+    add_median_and_landmark_legend(
+        ax,
+        series_handles=[
+            Line2D([0], [0], color="C0", linewidth=2, label="Observed MFE"),
+            Line2D([0], [0], color="C1", linewidth=2, label="Mean shuffled MFE"),
+        ],
+        median_label="Median",
+        landmark_label="0 landmark",
+    )
 
     ax = axes[0, 2]
     delta_valid = delta[np.isfinite(delta)]
@@ -240,7 +258,14 @@ def main():
     ax.set_title(f"Delta MFE distribution (n={len(delta_valid):,})")
     ax.set_xlabel("delta_mfe = observed - mean_shuffled")
     ax.set_ylabel("Density")
-    ax.legend()
+    add_median_and_landmark_legend(
+        ax,
+        series_handles=[
+            Line2D([0], [0], color="gray", linewidth=2, label="Delta MFE"),
+        ],
+        median_label="Median",
+        landmark_label="0 landmark",
+    )
 
     ax = axes[1, 0]
     p_valid = p[np.isfinite(p)]
@@ -262,7 +287,14 @@ def main():
     ax.set_title(f"Z-score distribution (n={len(z_valid):,})")
     ax.set_xlabel("zscore_mfe")
     ax.set_ylabel("Density")
-    ax.legend()
+    add_median_and_landmark_legend(
+        ax,
+        series_handles=[
+            Line2D([0], [0], color="gray", linewidth=2, label="Z-score"),
+        ],
+        median_label="Median",
+        landmark_label="0 landmark",
+    )
 
     ax = axes[1, 2]
     if len(obs_paired):
@@ -293,8 +325,10 @@ def main():
             delta_flip_l = flip_l - null_mean
             delta_flip_r = flip_r - null_mean
 
+            obs_valid = obs[np.isfinite(obs)]
             flip_l_valid = flip_l[np.isfinite(flip_l)]
             flip_r_valid = flip_r[np.isfinite(flip_r)]
+            delta_obs_valid = delta[np.isfinite(delta)]
             delta_flip_l_valid = delta_flip_l[np.isfinite(delta_flip_l)]
             delta_flip_r_valid = delta_flip_r[np.isfinite(delta_flip_r)]
 
@@ -302,35 +336,45 @@ def main():
             fig2.suptitle(f"{sample_name}: flipped-arm MFE summary", fontsize=18, y=0.98)
 
             ax = axes2[0]
-            density_line(ax, flip_l_valid, "Reverse lseq MFE", color="C0")
-            density_line(ax, flip_r_valid, "Reverse rseq MFE", color="C1")
+            density_line(ax, obs_valid, "Observed MFE", color="C0")
+            density_line(ax, flip_l_valid, "Reverse lseq MFE", color="C2")
+            density_line(ax, flip_r_valid, "Reverse rseq MFE", color="C4")
+            if len(obs_valid):
+                ax.axvline(np.nanmedian(obs_valid), linestyle="--", linewidth=1.5, color="C0")
             if len(flip_l_valid):
-                ax.axvline(np.nanmedian(flip_l_valid), linestyle="--", linewidth=1.5, color="C0")
+                ax.axvline(np.nanmedian(flip_l_valid), linestyle="--", linewidth=1.5, color="C2")
             if len(flip_r_valid):
-                ax.axvline(np.nanmedian(flip_r_valid), linestyle="--", linewidth=1.5, color="C1")
+                ax.axvline(np.nanmedian(flip_r_valid), linestyle="--", linewidth=1.5, color="C4")
             ax.axvline(0, linestyle=":", linewidth=1.5, color="gray")
-            ax.set_title(f"Flipped arm density (nL={len(flip_l_valid):,}, nR={len(flip_r_valid):,})")
+            ax.set_title(
+                f"Flipped arm density (nObs={len(obs_valid):,}, nL={len(flip_l_valid):,}, nR={len(flip_r_valid):,})"
+            )
             ax.set_xlabel("MFE (kcal/mol)")
             ax.set_ylabel("Density")
             add_median_and_landmark_legend(
                 ax,
                 series_handles=[
-                    Line2D([0], [0], color="C0", linewidth=2, label="Reverse lseq MFE"),
-                    Line2D([0], [0], color="C1", linewidth=2, label="Reverse rseq MFE"),
+                    Line2D([0], [0], color="C0", linewidth=2, label="Observed MFE"),
+                    Line2D([0], [0], color="C2", linewidth=2, label="Reverse lseq MFE"),
+                    Line2D([0], [0], color="C4", linewidth=2, label="Reverse rseq MFE"),
                 ],
                 median_label="Median",
                 landmark_label="0 landmark",
             )
 
             ax = axes2[1]
+            if len(obs_valid):
+                x, y = ecdf(obs_valid)
+                ax.plot(x, y, linewidth=2, color="C0", label="Observed MFE")
+                ax.axvline(np.nanmedian(obs_valid), linestyle="--", linewidth=1.5, color="C0")
             if len(flip_l_valid):
                 x, y = ecdf(flip_l_valid)
-                ax.plot(x, y, linewidth=2, color="C0", label="Reverse lseq MFE")
-                # ax.axvline(np.nanmedian(flip_l_valid), linestyle="--", linewidth=1.5, color="C0")
+                ax.plot(x, y, linewidth=2, color="C2", label="Reverse lseq MFE")
+                ax.axvline(np.nanmedian(flip_l_valid), linestyle="--", linewidth=1.5, color="C2")
             if len(flip_r_valid):
                 x, y = ecdf(flip_r_valid)
-                ax.plot(x, y, linewidth=2, color="C1", label="Reverse rseq MFE")
-                # ax.axvline(np.nanmedian(flip_r_valid), linestyle="--", linewidth=1.5, color="C1")
+                ax.plot(x, y, linewidth=2, color="C4", label="Reverse rseq MFE")
+                ax.axvline(np.nanmedian(flip_r_valid), linestyle="--", linewidth=1.5, color="C4")
             ax.axvline(0, linestyle=":", linewidth=1.5, color="gray")
             ax.set_title("Flipped ECDF")
             ax.set_xlabel("MFE (kcal/mol)")
@@ -338,20 +382,24 @@ def main():
             add_median_and_landmark_legend(
                 ax,
                 series_handles=[
-                    Line2D([0], [0], color="C0", linewidth=2, label="Reverse lseq MFE"),
-                    Line2D([0], [0], color="C1", linewidth=2, label="Reverse rseq MFE"),
+                    Line2D([0], [0], color="C0", linewidth=2, label="Observed MFE"),
+                    Line2D([0], [0], color="C2", linewidth=2, label="Reverse lseq MFE"),
+                    Line2D([0], [0], color="C4", linewidth=2, label="Reverse rseq MFE"),
                 ],
                 median_label="Median",
                 landmark_label="0 landmark",
             )
 
             ax = axes2[2]
-            density_line(ax, delta_flip_l_valid, "Delta reverse lseq", color="C0")
-            density_line(ax, delta_flip_r_valid, "Delta reverse rseq", color="C1")
+            density_line(ax, delta_obs_valid, "Delta observed", color="C0")
+            density_line(ax, delta_flip_l_valid, "Delta reverse lseq", color="C2")
+            density_line(ax, delta_flip_r_valid, "Delta reverse rseq", color="C4")
+            if len(delta_obs_valid):
+                ax.axvline(np.nanmedian(delta_obs_valid), linestyle="--", linewidth=1.5, color="C0")
             if len(delta_flip_l_valid):
-                ax.axvline(np.nanmedian(delta_flip_l_valid), linestyle="--", linewidth=1.5, color="C0")
+                ax.axvline(np.nanmedian(delta_flip_l_valid), linestyle="--", linewidth=1.5, color="C2")
             if len(delta_flip_r_valid):
-                ax.axvline(np.nanmedian(delta_flip_r_valid), linestyle="--", linewidth=1.5, color="C1")
+                ax.axvline(np.nanmedian(delta_flip_r_valid), linestyle="--", linewidth=1.5, color="C4")
             ax.axvline(0, linestyle=":", linewidth=1.5, color="gray")
             ax.set_title(
                 f"Flipped delta MFE (nL={len(delta_flip_l_valid):,}, nR={len(delta_flip_r_valid):,})"
@@ -361,8 +409,9 @@ def main():
             add_median_and_landmark_legend(
                 ax,
                 series_handles=[
-                    Line2D([0], [0], color="C0", linewidth=2, label="Delta reverse lseq"),
-                    Line2D([0], [0], color="C1", linewidth=2, label="Delta reverse rseq"),
+                    Line2D([0], [0], color="C0", linewidth=2, label="Delta observed"),
+                    Line2D([0], [0], color="C2", linewidth=2, label="Delta reverse lseq"),
+                    Line2D([0], [0], color="C4", linewidth=2, label="Delta reverse rseq"),
                 ],
                 median_label="Median",
                 landmark_label="0 landmark",

@@ -208,10 +208,10 @@ def main():
     x2, y2 = ecdf(null_mean)
     if len(x1):
         ax.plot(x1, y1, linewidth=2, label="Observed MFE")
-        ax.axvline(np.nanmedian(obs), linestyle="--", linewidth=1.5, color="C0")
+        # ax.axvline(np.nanmedian(obs), linestyle="--", linewidth=1.5, color="C0")
     if len(x2):
         ax.plot(x2, y2, linewidth=2, label="Mean shuffled MFE")
-        ax.axvline(np.nanmedian(null_mean), linestyle="--", linewidth=1.5, color="C1")
+        # ax.axvline(np.nanmedian(null_mean), linestyle="--", linewidth=1.5, color="C1")
     ax.set_title(f"ECDF (n={n_paired:,})")
     ax.set_xlabel("MFE (kcal/mol)")
     ax.set_ylabel("Cumulative fraction")

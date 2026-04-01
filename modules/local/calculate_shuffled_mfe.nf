@@ -1,4 +1,4 @@
-process CALCULATE_SHUFFLED_MFE {
+process CALCULATE_MFE_CONTROLS {
     tag "${meta.id}_${chunk.baseName}"
     label 'process_low'
 
@@ -8,7 +8,7 @@ process CALCULATE_SHUFFLED_MFE {
     tuple val(meta), path(chunk), path(mfe_table)
 
     output:
-    tuple val(meta), path("*shuffled_mfe.tsv"), emit: shuffled_mfe
+    tuple val(meta), path("*_mfe.tsv"), emit: mfe
     tuple val(meta), path("*_shuffled_mfe_all.tsv"), emit: shuffled_mfe_all
 
     script:
@@ -16,9 +16,9 @@ process CALCULATE_SHUFFLED_MFE {
     def flipped_arg = params.flipped_arm_mfe ? '--flipped-arm-mfe' : ''
 
     """
-    mfe_shuffle_chunk.py \\
+    mfe_controls_chunk.py \\
         --input ${mfe_table} \\
-        --output-summary ${prefix}_shuffled_mfe.tsv \\
+        --output-summary ${prefix}_mfe.tsv \\
         --output-detail ${prefix}_shuffled_mfe_all.tsv \\
         --processes ${task.cpus} \\
         --n-shuffles ${params.n_shuffles} \\

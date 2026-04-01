@@ -16,7 +16,7 @@ include { PREPARE_BED } from './modules/local/prepare_bed'
 include { EXTRACT_SEQUENCES } from './modules/local/extract_sequences'
 include { ADD_SEQUENCES } from './modules/local/add_sequences'
 include { CALCULATE_MFE } from './modules/local/calculate_mfe'
-include { CALCULATE_SHUFFLED_MFE } from './modules/local/calculate_shuffled_mfe'
+include { CALCULATE_MFE_CONTROLS } from './modules/local/calculate_shuffled_mfe'
 include { CONCATENATE_TABLES } from './modules/local/concatenate_tables'
 include { PLOT_MFE_SUMMARY } from './modules/local/plot_mfe_summary'
 
@@ -87,8 +87,8 @@ workflow {
         ch_mfe = CALCULATE_MFE.out.mfe
 
     } else {
-        CALCULATE_SHUFFLED_MFE(ADD_SEQUENCES.out.sequence_table)
-        ch_mfe = CALCULATE_SHUFFLED_MFE.out.shuffled_mfe
+        CALCULATE_MFE_CONTROLS(ADD_SEQUENCES.out.sequence_table)
+        ch_mfe = CALCULATE_MFE_CONTROLS.out.mfe
 
     }
 

@@ -1,0 +1,9 @@
+name: nc-rna-benchmarking
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.10
+  - gemmi
+  - numpy
+  - scipy
+  - matplotlib

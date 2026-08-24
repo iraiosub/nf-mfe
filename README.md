@@ -153,6 +153,130 @@ nextflow run main.nf \
   -profile docker
 ```
 
+## rRNA Structure Distance Maps
+
+This repository also includes a standalone helper script,
+`nc_rna_benchmarking/rrna_dist.py`, for turning a ribosome structure file into
+rRNA physical distance matrices and quick-look plots. This is separate from the
+Nextflow MFE pipeline above: it is for benchmarking interaction/contact signals
+against the 3D geometry of modelled rRNA chains.
+
+### Setup
+
+Create the local environment:
+
+```bash
+conda env create -f nc_rna_benchmarking/environment.yml
+conda activate nc-rna-benchmarking
+```
+
+Download a ribosome structure from the PDB in mmCIF format, for example:
+
+```bash
+curl -O https://files.rcsb.org/download/6EK0.cif
+```
+
+Run the script:
+
+```bash
+python nc_rna_benchmarking/rrna_dist.py 6EK0.cif
+```
+
+By default, outputs are written to `rrna_dist_outputs/`, which is ignored by
+Git. The default bin sizes are `1,8,16,64,128` nt:
+
+```bash
+python nc_rna_benchmarking/rrna_dist.py 6EK0.cif --bins 1,8,16,64,128
+```
+
+Useful options:
+
+```bash
+# Write somewhere else
+python nc_rna_benchmarking/rrna_dist.py 6EK0.cif --outdir dist_6EK0
+
+# Use phosphate positions instead of C1' positions
+python nc_rna_benchmarking/rrna_dist.py 6EK0.cif --atom P
+
+# Skip PNG generation and only write arrays/tables
+python nc_rna_benchmarking/rrna_dist.py 6EK0.cif --no-plots
+```
+
+### Outputs
+
+The output root contains one FASTA file per detected rRNA chain:
+
+```text
+rrna_dist_outputs/
+  28S_chainX.fa
+  18S_chainY.fa
+  rrna_dist.log
+  bin_001nt/
+  bin_008nt/
+  bin_016nt/
+  bin_064nt/
+  bin_128nt/
+```
+
+Each `bin_*nt/` directory contains one set of files per chain:
+
+- `*.dist.npy`: physical distance matrix in Angstroms
+- `*.xyz.npy`: coordinate array used for plotting that bin resolution
+- `*.bins.tsv`: mapping from matrix row to polymer `seq_id` and deposited residue-number window
+- `*.distance_map.png`: heatmap of pairwise physical distances
+- `*.structure_trace.png`: 3D trace plot of the modelled chain
+
+The root-level FASTA is intentionally not repeated inside binned folders. At
+coarse resolutions, a matrix row represents a residue window rather than one
+nucleotide, so `*.bins.tsv` is the authoritative row mapping for binned outputs.
+
+### Methodology
+
+The script reads the first model from a structure file using
+[`gemmi`](https://gemmi.readthedocs.io/), then keeps chains with at least
+`--min-len` nucleotide-like residues. A residue is treated as RNA if it has a
+`C1'` atom, which also captures many modified bases. Chains are labelled as
+`28S`, `18S`, `5.8S`, `5S`, or `other` using the full polymer span from the
+mmCIF sequence scheme when available, or the residue-number span as a fallback.
+This matters because cryo-EM ribosome models often omit disordered expansion
+segments; the full chain span is usually a better proxy for the mature rRNA
+identity than the count of observed residues.
+
+Use `.cif`/mmCIF input when possible. Classic `.pdb` files may be readable, but
+they do not carry `_pdbx_poly_seq_scheme`, so the script must fall back to
+numeric residue-ID inference for the sequence axis.
+
+For the nucleotide-level matrix (`bin_001nt`), each residue is represented by
+one coordinate. The default is the ribose `C1'` atom because it is present in
+standard and modified RNA residues and gives a stable per-nucleotide anchor
+near the base. `--atom P` can be used if phosphate-backbone distances are more
+appropriate for a given analysis. `--atom centroid` uses the average position
+of all atoms in each residue, but this should be interpreted as a display or
+coarse geometric summary rather than a direct contact definition.
+
+For mmCIF inputs, missing and modelled positions are taken from
+`_pdbx_poly_seq_scheme`, the PDB table that maps the full polymer sequence
+(`seq_id`) to the deposited/modelled residue numbering. That is more reliable
+than inferring gaps from numeric residue IDs alone, especially for structures
+with unusual numbering or insertion codes. If the table is not present, the
+script falls back to the older contiguous numeric-residue inference. In both
+cases, unmodelled positions have `NaN` coordinates. Matplotlib uses those
+`NaN`s to break the 3D trace line, so the plot does not draw fake backbone
+chords across missing segments.
+
+For coarse bins such as 8, 16, 64, and 128 nt, the distance matrix is not
+computed from centroid-to-centroid distances. Large windows can span separate
+structural domains, so their centroid may sit in empty solvent and imply a
+distance that does not correspond to any nucleotide pair. Instead, the script
+first computes the nucleotide-level distance matrix once and then block-reduces
+each pair of windows with a minimum distance. In other words, a binned matrix
+entry answers: "what is the closest modelled nucleotide pair between window i
+and window j?" This is a better denominator for contact-style benchmarking.
+
+Centroid coordinates are still written as `*.xyz.npy` for binned resolutions
+because they are useful for quick-look 3D trace plots and visual summaries.
+They should not be treated as the source of the coarse-bin contact distances.
+
 ## Notes to self
 
 ### Settings for local testing

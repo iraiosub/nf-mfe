@@ -277,6 +277,80 @@ Centroid coordinates are still written as `*.xyz.npy` for binned resolutions
 because they are useful for quick-look 3D trace plots and visual summaries.
 They should not be treated as the source of the coarse-bin contact distances.
 
+### KARR-seq-Compatible Variant
+
+`nc_rna_benchmarking/rrna_dist_karrseq.py` is a related script for reproducing
+the style of rRNA structure benchmark used by KARR-seq. It has the same broad
+purpose as `rrna_dist.py`: read a ribosome structure, extract rRNA chains, and
+write distance matrices plus sequence/row-mapping files. The difference is that
+it exposes the windowing and reduction choices explicitly, including a
+`--karr-seq` preset.
+
+Run it with:
+
+```bash
+python nc_rna_benchmarking/rrna_dist_karrseq.py 4V6X.cif --karr-seq
+```
+
+The KARR-seq preset expands to:
+
+```bash
+--bins 1,5 --atom centroid --centroid-weight atom --reduce centroid
+```
+
+This means:
+
+- rRNA is split into 5-nt windows, plus an unbinned 1-nt output.
+- Each window is represented by the centroid of its modelled atoms.
+- Window-window distances are Euclidean distances between those centroids.
+- Atom-weighted centroids are used, matching the KARR-seq convention where
+  residues with more atoms contribute slightly more to the window centroid.
+
+The script docstring notes `4V6X` as the structure to use for direct comparison
+with the published KARR-seq rRNA benchmark. Newer structures such as `6EK0` may
+be better resolved, but they are not the same benchmark reference.
+
+Additional modes:
+
+```bash
+# KARR-seq-style centroid distances, but with custom bins
+python nc_rna_benchmarking/rrna_dist_karrseq.py 4V6X.cif \
+  --bins 1,5,10 \
+  --atom centroid \
+  --reduce centroid
+
+# Closest nucleotide pair between each pair of windows
+python nc_rna_benchmarking/rrna_dist_karrseq.py 4V6X.cif \
+  --bins 1,8,16,64,128 \
+  --atom "C1'" \
+  --reduce min
+
+# Fraction of modelled nucleotide pairs below a contact threshold
+python nc_rna_benchmarking/rrna_dist_karrseq.py 4V6X.cif \
+  --bins 5 \
+  --reduce contact \
+  --contact-cutoff 16
+```
+
+The reduction modes answer different biological/computational questions:
+
+- `centroid`: distance between window centroids. This matches KARR-seq and is
+  reasonable for small compact windows, especially 5 nt. It becomes harder to
+  interpret for large windows because the centroid may fall between domains or
+  in solvent.
+- `min`: closest nucleotide pair between two windows. This asks whether any
+  part of two regions comes close, which is useful for contact-style
+  denominators, but values are not directly comparable across bin sizes because
+  larger bins contain more possible nucleotide pairs.
+- `contact`: fraction of modelled nucleotide pairs below `--contact-cutoff`.
+  This is closer to a contact-density interpretation and normalises by the
+  number of modelled pairs, which helps with partially missing windows.
+
+`rrna_dist_karrseq.py` also writes `*.lookup.tsv` in each bin directory. That
+file maps each polymer `seq_id` / deposited residue label to the matrix row for
+that bin, which is useful when mapping chimeric-read arm midpoints onto the
+structure matrix.
+
 ## Notes to self
 
 ### Settings for local testing

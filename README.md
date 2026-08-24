@@ -176,6 +176,13 @@ Download a ribosome structure from the PDB in mmCIF format, for example:
 curl -O https://files.rcsb.org/download/6EK0.cif
 ```
 
+An mmCIF file (`.cif`) is the modern PDB structure format. It is a structured
+text file containing tables of atoms, chains, residues, 3D coordinates, and
+sequence-to-structure mappings. The script mainly uses `_atom_site` for atom
+coordinates and `_pdbx_poly_seq_scheme` to map the full rRNA sequence onto the
+residues that were actually modelled. Classic `.pdb` files may contain the atom
+coordinates, but they usually lack this explicit full-sequence mapping.
+
 Run the script:
 
 ```bash

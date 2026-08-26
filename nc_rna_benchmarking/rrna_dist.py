@@ -28,9 +28,8 @@ import shlex
 import warnings
 from pathlib import Path
 
-# Rough residue-number spans of mature human rRNAs, for auto-labelling chains.
-# Span is more stable than the number of modelled residues because structures
-# often omit disordered expansion segments.
+# Rough residue-number spans of mature human rRNAs. These are a fallback when
+# mmCIF entity descriptions do not identify the rRNA species.
 KNOWN = [(3400, 5600, "28S"), (1500, 1950, "18S"), (140, 200, "5.8S"), (100, 135, "5S")]
 
 np = None
@@ -97,6 +96,101 @@ def residue_span(residues):
     return max(nums) - min(nums) + 1
 
 
+def is_int(value):
+    try:
+        int(value)
+    except ValueError:
+        return False
+    return True
+
+
+def parse_entity_metadata(cif_path):
+    """Read enough mmCIF metadata to classify polymer chains."""
+    metadata = {"entities": {}, "poly_types": {}, "asym_to_entity": {}}
+    tags = None
+    in_loop = False
+    category = None
+
+    with open(cif_path) as fh:
+        for raw in fh:
+            line = raw.strip()
+            if not line:
+                continue
+            if line == "loop_":
+                tags = []
+                in_loop = True
+                category = None
+                continue
+            if not in_loop:
+                continue
+            if line.startswith("_"):
+                tags.append(line)
+                if line.startswith("_entity."):
+                    category = "_entity"
+                elif line.startswith("_entity_poly."):
+                    category = "_entity_poly"
+                elif line.startswith("_struct_asym."):
+                    category = "_struct_asym"
+                continue
+            if line.startswith("#"):
+                in_loop = False
+                tags = None
+                category = None
+                continue
+            if line.startswith(";") or category is None:
+                continue
+
+            try:
+                values = shlex.split(line)
+            except ValueError:
+                continue
+            if not values:
+                continue
+
+            if category == "_entity" and len(values) >= 4 and is_int(values[0]):
+                metadata["entities"][values[0]] = {
+                    "type": cif_value(values[1]),
+                    "description": cif_value(values[3]),
+                }
+            elif category == "_entity_poly" and len(values) >= 2 and is_int(values[0]):
+                metadata["poly_types"][values[0]] = cif_value(values[1])
+            elif category == "_struct_asym" and len(values) >= 4:
+                metadata["asym_to_entity"][cif_value(values[0])] = cif_value(values[3])
+
+    return metadata
+
+
+def description_label(description):
+    desc = description.lower()
+    if "5.8s" in desc or "5.8 s" in desc:
+        return "5.8S"
+    if "28s" in desc or "28 s" in desc:
+        return "28S"
+    if "18s" in desc or "18 s" in desc:
+        return "18S"
+    if "5s" in desc or "5 s" in desc:
+        return "5S"
+    return None
+
+
+def is_rna_entity(entity_id, metadata):
+    if not entity_id:
+        return None
+    poly_type = metadata["poly_types"].get(entity_id, "").lower()
+    description = metadata["entities"].get(entity_id, {}).get("description", "").lower()
+    if "ribonucleotide" in poly_type or "rna" in description:
+        return True
+    if poly_type or description:
+        return False
+    return None
+
+
+def entity_description(entity_id, metadata):
+    if not entity_id:
+        return ""
+    return metadata["entities"].get(entity_id, {}).get("description", "")
+
+
 def parse_poly_seq_scheme(cif_path):
     """Return authoritative full-polymer sequence rows keyed by mmCIF chain IDs."""
     tags = None
@@ -145,6 +239,7 @@ def parse_poly_seq_scheme(cif_path):
     for row in rows:
         seq_id = int(cif_value(row["_pdbx_poly_seq_scheme.seq_id"]))
         entry = {
+            "entity_id": cif_value(row["_pdbx_poly_seq_scheme.entity_id"]),
             "seq_id": seq_id,
             "mon_id": cif_value(row["_pdbx_poly_seq_scheme.mon_id"]),
             "pdb_seq_num": cif_value(row["_pdbx_poly_seq_scheme.pdb_seq_num"]),
@@ -450,6 +545,13 @@ def main():
 
     logging.info("reading structure %s", args.cif)
     logging.info("atom=%s min_len=%d bins=%s plots=%s", args.atom, args.min_len, bins, not args.no_plots)
+    entity_metadata = parse_entity_metadata(args.cif)
+    logging.info(
+        "read entity metadata: %d entities, %d polymer types, %d asym mappings",
+        len(entity_metadata["entities"]),
+        len(entity_metadata["poly_types"]),
+        len(entity_metadata["asym_to_entity"]),
+    )
     schemes = parse_poly_seq_scheme(args.cif)
     if schemes:
         logging.info(
@@ -465,17 +567,30 @@ def main():
 
     seen = {}
     for chain in model:
-        res = nucleotides(chain)
-        if len(res) < args.min_len:
-            logging.debug("skipping chain %s: %d nucleotide residues", chain.name, len(res))
-            continue
         scheme_rows = schemes.get("pdb_strand_id", {}).get(chain.name)
         scheme_key = "pdb_strand_id"
         if scheme_rows is None:
             scheme_rows = schemes.get("asym_id", {}).get(chain.name)
             scheme_key = "asym_id"
+
+        entity_id = scheme_rows[0]["entity_id"] if scheme_rows else entity_metadata["asym_to_entity"].get(chain.name)
+        metadata_rna = is_rna_entity(entity_id, entity_metadata)
+        description = entity_description(entity_id, entity_metadata)
+        if metadata_rna is False:
+            logging.debug("skipping chain %s: entity %s is %s", chain.name, entity_id, description)
+            continue
+
+        res = nucleotides(chain)
+        if len(res) < args.min_len:
+            logging.debug("skipping chain %s: %d nucleotide residues", chain.name, len(res))
+            continue
+
         span = len(scheme_rows) if scheme_rows else residue_span(res)
-        label = guess_name(span)
+        label = description_label(description)
+        label_source = "entity description"
+        if label is None:
+            label = guess_name(span)
+            label_source = "span fallback"
         if label in seen:
             logging.info("found another %s-like chain; chain name will keep outputs unique", label)
         seen[label] = True
@@ -497,9 +612,11 @@ def main():
         D_full = cdist(xyz, xyz)               # NaN propagates for unmodelled residues
         write_fasta(outdir / f"{chain_tag}.fa", chain_tag, offset, seq, len(res))
         logging.info(
-            "chain=%s label=%s span=%d modelled=%d axis=%s first_seq_id=%d gaps=%d",
+            "chain=%s label=%s label_source=%s entity=%s span=%d modelled=%d axis=%s first_seq_id=%d gaps=%d",
             chain.name,
             label,
+            label_source,
+            entity_id or "",
             span,
             len(res),
             axis_source,

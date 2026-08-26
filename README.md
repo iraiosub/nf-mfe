@@ -241,13 +241,15 @@ nucleotide, so `*.bins.tsv` is the authoritative row mapping for binned outputs.
 
 The script reads the first model from a structure file using
 [`gemmi`](https://gemmi.readthedocs.io/), then keeps chains with at least
-`--min-len` nucleotide-like residues. A residue is treated as RNA if it has a
-`C1'` atom, which also captures many modified bases. Chains are labelled as
-`28S`, `18S`, `5.8S`, `5S`, or `other` using the full polymer span from the
-mmCIF sequence scheme when available, or the residue-number span as a fallback.
-This matters because cryo-EM ribosome models often omit disordered expansion
-segments; the full chain span is usually a better proxy for the mature rRNA
-identity than the count of observed residues.
+`--min-len` nucleotide-like residues. For mmCIF inputs, RNA/protein
+classification comes from metadata first: `_entity_poly.type` identifies
+polyribonucleotide entities, `_entity.pdbx_description` gives descriptions such
+as `28S ribosomal RNA`, and `_pdbx_poly_seq_scheme` / `_struct_asym` connect
+those entities to chain IDs. The script labels chains as `28S`, `18S`, `5.8S`,
+`5S`, or `other` from the entity description when possible, then falls back to
+the full polymer span, and finally to the observed residue-number span if the
+metadata is missing. The atom-level `C1'` check is still used as a fallback and
+as the coordinate anchor for RNA residues, including many modified bases.
 
 Use `.cif`/mmCIF input when possible. Classic `.pdb` files may be readable, but
 they do not carry `_pdbx_poly_seq_scheme`, so the script must fall back to

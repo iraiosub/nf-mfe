@@ -207,6 +207,9 @@ python nc_rna_benchmarking/rrna_dist.py 6EK0.cif --atom P
 
 # Skip PNG generation and only write arrays/tables
 python nc_rna_benchmarking/rrna_dist.py 6EK0.cif --no-plots
+
+# Change the visible masked-diagonal band in PNGs only
+python nc_rna_benchmarking/rrna_dist.py 6EK0.cif --masked-diagonal-width 3
 ```
 
 ### Outputs
@@ -231,6 +234,7 @@ Each `bin_*nt/` directory contains one set of files per chain:
 - `*.xyz.npy`: coordinate array used for plotting that bin resolution
 - `*.bins.tsv`: mapping from matrix row to polymer `seq_id` and deposited residue-number window
 - `*.distance_map.png`: heatmap of pairwise physical distances
+- `*.distance_map.masked_diagonal.png`: the same heatmap with a visible plot-only diagonal mask
 - `*.structure_trace.png`: 3D trace plot of the modelled chain
 
 The root-level FASTA is intentionally not repeated inside binned folders. At
@@ -318,6 +322,14 @@ This means:
 The script docstring notes `4V6X` as the structure to use for direct comparison
 with the published KARR-seq rRNA benchmark. Newer structures such as `6EK0` may
 be better resolved, but they are not the same benchmark reference.
+
+Reference structures mentioned here:
+
+| RNA target | PDB ID |
+| ---------- | ------ |
+| 18S / 28S rRNA | 8QOI |
+| TERC / human telomerase RNA | 9Q16 |
+| U1 snRNA | 6QX9 |
 
 Additional modes:
 

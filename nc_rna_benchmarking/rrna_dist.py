@@ -24,13 +24,20 @@ Notes
 import argparse
 import logging
 import os
+import re
 import shlex
 import warnings
 from pathlib import Path
 
-# Rough residue-number spans of mature human rRNAs. These are a fallback when
-# mmCIF entity descriptions do not identify the rRNA species.
-KNOWN = [(3400, 5600, "28S"), (1500, 1950, "18S"), (140, 200, "5.8S"), (100, 135, "5S")]
+# Rough residue-number spans of human RNAs. These are a fallback when mmCIF
+# entity descriptions do not identify the RNA species.
+KNOWN = [
+    (3400, 5600, "28S"),
+    (1500, 1950, "18S"),
+    (400, 500, "TERC"),
+    (140, 200, "5.8S"),
+    (100, 135, "5S"),
+]
 
 np = None
 gemmi = None
@@ -162,13 +169,25 @@ def parse_entity_metadata(cif_path):
 
 def description_label(description):
     desc = description.lower()
+    if re.search(r"\bu1\s+(snrna|small nuclear rna)\b", desc):
+        return "U1"
+    if re.search(r"\bu2\s+(snrna|small nuclear rna)\b", desc):
+        return "U2"
+    if re.search(r"\bu4\s+(snrna|small nuclear rna)\b", desc):
+        return "U4"
+    if re.search(r"\bu5\s+(snrna|small nuclear rna)\b", desc):
+        return "U5"
+    if re.search(r"\bu6\s+(snrna|small nuclear rna)\b", desc):
+        return "U6"
+    if "terc" in desc or "telomerase rna" in desc or "telomerase rna component" in desc:
+        return "TERC"
     if "5.8s" in desc or "5.8 s" in desc:
         return "5.8S"
     if "28s" in desc or "28 s" in desc:
         return "28S"
     if "18s" in desc or "18 s" in desc:
         return "18S"
-    if "5s" in desc or "5 s" in desc:
+    if re.search(r"\b5s\s+(rrna|ribosomal rna)\b", desc):
         return "5S"
     return None
 
@@ -357,6 +376,14 @@ def block_min_distance(D, bin_size):
         return np.nanmin(D.reshape(nb, bin_size, nb, bin_size), axis=(1, 3))
 
 
+def mask_diagonal_band(D, half_width):
+    out = D.copy()
+    n = len(out)
+    i, j = np.indices((n, n))
+    out[np.abs(i - j) <= half_width] = np.nan
+    return out
+
+
 def binned_arrays(seq, coords, offset, bin_size, row_ids=None, resid_labels=None):
     """Return binned coordinates and row metadata for a given bin size."""
     n = len(coords)
@@ -427,8 +454,18 @@ def plot_distance_map(path, D, tag, bin_size, plot_max_size):
     finite = np.isfinite(plot_d)
     vmax = np.nanpercentile(plot_d[finite], 95) if finite.any() else 1.0
 
+    cmap = plt.get_cmap("viridis_r").copy()
+    cmap.set_bad("#f2f2f2")
+
     fig, ax = plt.subplots(figsize=(8, 7), constrained_layout=True)
-    im = ax.imshow(plot_d, cmap="viridis_r", origin="lower", vmin=0, vmax=vmax)
+    im = ax.imshow(
+        np.ma.masked_invalid(plot_d),
+        cmap=cmap,
+        origin="lower",
+        vmin=0,
+        vmax=vmax,
+        interpolation="nearest",
+    )
     title = f"{tag} physical distance map"
     if stride > 1:
         title += f" (shown every {stride} bins)"
@@ -532,12 +569,20 @@ def main():
     )
     ap.add_argument("--no-plots", action="store_true", help="skip PNG plot generation")
     ap.add_argument("--plot-max-size", type=int, default=2200, help="max plotted rows/cols")
+    ap.add_argument(
+        "--masked-diagonal-width",
+        type=int,
+        default=1,
+        help="half-width, in matrix rows, for plot-only diagonal masking (default: 1)",
+    )
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
 
     bins = sorted(set(args.bin)) if args.bin else args.bins
     if any(bin_size < 1 for bin_size in bins):
         ap.error("bin sizes must be >= 1")
+    if args.masked_diagonal_width < 0:
+        ap.error("--masked-diagonal-width must be >= 0")
     load_runtime_deps()
     outdir = Path(args.outdir)
     os.makedirs(outdir, exist_ok=True)
@@ -644,6 +689,13 @@ def main():
                     bin_dir / f"{tag}.distance_map.png",
                     D,
                     tag,
+                    bin_size,
+                    args.plot_max_size,
+                )
+                plot_distance_map(
+                    bin_dir / f"{tag}.distance_map.masked_diagonal.png",
+                    mask_diagonal_band(D, args.masked_diagonal_width),
+                    f"{tag} diagonal masked (+/- {args.masked_diagonal_width})",
                     bin_size,
                     args.plot_max_size,
                 )

@@ -17,7 +17,7 @@ read.  `--karr-seq` is a preset for exactly that:
 
     --bins 1,5 --atom centroid --centroid-weight atom --reduce centroid
 
-They used 4V6X for 18S/28S (also 7QXB for TERC, 6QX9 for U3).  Use 4V6X if you
+They used 4V6X for 18S/28S (also 7QXB for TERC, 6QX9 for U1 snRNA).  Use 4V6X if you
 want numbers directly comparable to the published benchmark; 6EK0 is newer and
 better resolved if you only want the best available human structure.
 
@@ -54,15 +54,22 @@ Notes
 import argparse
 import logging
 import os
+import re
 import shlex
 import warnings
 from pathlib import Path
 
-# Rough residue-number spans of mature HUMAN CYTOPLASMIC rRNAs. These are a
-# fallback when mmCIF entity descriptions do not identify the rRNA species.
+# Rough residue-number spans of human RNAs. These are a fallback when mmCIF
+# entity descriptions do not identify the RNA species.
 # Caveat: bacterial 16S (~1540 nt) and mitochondrial 12S/16S fall inside or near
 # these windows and will be mislabelled.  Use --label-from-chain for those.
-KNOWN = [(3400, 5600, "28S"), (1500, 1950, "18S"), (140, 200, "5.8S"), (100, 135, "5S")]
+KNOWN = [
+    (3400, 5600, "28S"),
+    (1500, 1950, "18S"),
+    (400, 500, "TERC"),
+    (140, 200, "5.8S"),
+    (100, 135, "5S"),
+]
 
 np = None
 gemmi = None
@@ -194,13 +201,25 @@ def parse_entity_metadata(cif_path):
 
 def description_label(description):
     desc = description.lower()
+    if re.search(r"\bu1\s+(snrna|small nuclear rna)\b", desc):
+        return "U1"
+    if re.search(r"\bu2\s+(snrna|small nuclear rna)\b", desc):
+        return "U2"
+    if re.search(r"\bu4\s+(snrna|small nuclear rna)\b", desc):
+        return "U4"
+    if re.search(r"\bu5\s+(snrna|small nuclear rna)\b", desc):
+        return "U5"
+    if re.search(r"\bu6\s+(snrna|small nuclear rna)\b", desc):
+        return "U6"
+    if "terc" in desc or "telomerase rna" in desc or "telomerase rna component" in desc:
+        return "TERC"
     if "5.8s" in desc or "5.8 s" in desc:
         return "5.8S"
     if "28s" in desc or "28 s" in desc:
         return "28S"
     if "18s" in desc or "18 s" in desc:
         return "18S"
-    if "5s" in desc or "5 s" in desc:
+    if re.search(r"\b5s\s+(rrna|ribosomal rna)\b", desc):
         return "5S"
     return None
 
@@ -468,6 +487,14 @@ def mask_diagonal(D, min_separation):
     return out
 
 
+def mask_diagonal_band(D, half_width):
+    out = D.copy()
+    n = len(out)
+    i, j = np.indices((n, n))
+    out[np.abs(i - j) <= half_width] = np.nan
+    return out
+
+
 def bin_row_metadata(seq, coords, bin_size, row_ids, resid_labels):
     """Per-row provenance: which residues went in, and how many were modelled."""
     n = len(coords)
@@ -536,13 +563,13 @@ def plot_distance_map(path, D, tag, bin_size, plot_max_size, reduce_mode, cutoff
     contact_mode = reduce_mode == "contact"
 
     if contact_mode:
-        cmap, vmin = "magma", 0.0
+        cmap_name, vmin = "magma", 0.0
         vmax = np.nanpercentile(plot_d[finite], 99) if finite.any() else 1.0
         vmax = max(vmax, 1e-6)
         cbar_label = f"fraction of modelled pairs < {cutoff:g} A"
         title = f"{tag} contact density"
     else:
-        cmap, vmin = "viridis_r", 0.0
+        cmap_name, vmin = "viridis_r", 0.0
         vmax = np.nanpercentile(plot_d[finite], 95) if finite.any() else 1.0
         cbar_label = "distance (Angstrom)"
         title = f"{tag} physical distance map"
@@ -550,8 +577,18 @@ def plot_distance_map(path, D, tag, bin_size, plot_max_size, reduce_mode, cutoff
     if stride > 1:
         title += f" (shown every {stride} bins)"
 
+    cmap = plt.get_cmap(cmap_name).copy()
+    cmap.set_bad("#f2f2f2")
+
     fig, ax = plt.subplots(figsize=(8, 7), constrained_layout=True)
-    im = ax.imshow(plot_d, cmap=cmap, origin="lower", vmin=vmin, vmax=vmax)
+    im = ax.imshow(
+        np.ma.masked_invalid(plot_d),
+        cmap=cmap,
+        origin="lower",
+        vmin=vmin,
+        vmax=vmax,
+        interpolation="nearest",
+    )
     ax.set_title(title)
     ax.set_xlabel(f"matrix row ({bin_size} nt/bin)")
     ax.set_ylabel(f"matrix row ({bin_size} nt/bin)")
@@ -689,6 +726,12 @@ def build_parser():
     )
     ap.add_argument("--no-plots", action="store_true", help="skip PNG plot generation")
     ap.add_argument("--plot-max-size", type=int, default=2200, help="max plotted rows/cols")
+    ap.add_argument(
+        "--masked-diagonal-width",
+        type=int,
+        default=1,
+        help="half-width, in matrix rows, for plot-only diagonal masking (default: 1)",
+    )
     ap.add_argument("--verbose", action="store_true")
     return ap
 
@@ -721,6 +764,8 @@ def main():
         ap.error("bin sizes must be >= 1")
     if args.reduce == "contact" and args.contact_cutoff <= 0:
         ap.error("--contact-cutoff must be > 0")
+    if args.masked_diagonal_width < 0:
+        ap.error("--masked-diagonal-width must be >= 0")
 
     load_runtime_deps()
     outdir = Path(args.outdir)
@@ -866,6 +911,12 @@ def main():
                     bin_dir / f"{tag}.distance_map.png",
                     D, tag, bin_size, args.plot_max_size,
                     args.reduce, args.contact_cutoff,
+                )
+                plot_distance_map(
+                    bin_dir / f"{tag}.distance_map.masked_diagonal.png",
+                    mask_diagonal_band(D, args.masked_diagonal_width),
+                    f"{tag} diagonal masked (+/- {args.masked_diagonal_width})", bin_size,
+                    args.plot_max_size, args.reduce, args.contact_cutoff,
                 )
                 made_trace = plot_structure_trace(
                     bin_dir / f"{tag}.structure_trace.png", out_xyz, tag, bin_size,

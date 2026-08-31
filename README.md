@@ -183,10 +183,82 @@ pdb_id,name
 An example accession list is provided at
 `nc_rna_benchmarking/pdb_accessions.example.csv`.
 
+To discover PDB entries automatically, query RCSB for all polymer entities
+annotated as RNA and at least 200 nt long:
+
+```bash
+python nc_rna_benchmarking/find_rna_pdbs.py --min-rna-length 200
+```
+
+To restrict that search to cryo-EM structures only:
+
+```bash
+python nc_rna_benchmarking/find_rna_pdbs.py \
+  --min-rna-length 200 \
+  --experimental-method cryo-em
+```
+
+`--cryo-em-only` is equivalent. The script intentionally only exposes
+`cryo-em` as a named method filter right now, because that is the structure
+class used for these physical distance benchmarks.
+
+This writes two files:
+
+```text
+nc_rna_benchmarking/rna_pdbs_min200.accessions.csv
+nc_rna_benchmarking/rna_pdbs_min200.entities.tsv
+```
+
+With the cryo-EM filter, the default filenames become:
+
+```text
+nc_rna_benchmarking/rna_pdbs_min200_cryoem.accessions.csv
+nc_rna_benchmarking/rna_pdbs_min200_cryoem.entities.tsv
+```
+
+The `.accessions.csv` file is the downstream-compatible file: first column PDB
+ID, second column a short metadata label. It can be passed directly to the CIF
+downloader or to `rrna_dist_karrseq.py --accessions-csv`. The `.entities.tsv`
+file keeps the entity-level provenance, because one PDB entry can contain more
+than one long RNA chain.
+
+For an audit table with exact sequence lengths, entity descriptions, chain IDs,
+and source organisms, add:
+
+```bash
+python nc_rna_benchmarking/find_rna_pdbs.py \
+  --min-rna-length 200 \
+  --fetch-metadata
+```
+
+For a small test run before querying/downloading everything:
+
+```bash
+python nc_rna_benchmarking/find_rna_pdbs.py \
+  --min-rna-length 200 \
+  --limit 20
+```
+
 Download all listed structures into organized per-accession folders:
 
 ```bash
 python nc_rna_benchmarking/download_pdb_cifs.py nc_rna_benchmarking/pdb_accessions.example.csv
+```
+
+Or download the automatically discovered long-RNA set:
+
+```bash
+python nc_rna_benchmarking/download_pdb_cifs.py \
+  nc_rna_benchmarking/rna_pdbs_min200.accessions.csv
+```
+
+`find_rna_pdbs.py` can also do the download in the same command, but this may
+fetch many thousands of structures:
+
+```bash
+python nc_rna_benchmarking/find_rna_pdbs.py \
+  --min-rna-length 200 \
+  --download
 ```
 
 By default this writes to `nc_rna_benchmarking/pdb_structures/`, which is

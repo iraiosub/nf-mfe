@@ -148,3 +148,5 @@ slurm-*
 # ncRNA benchmarking generated outputs
 rrna_dist_outputs/
 nc_rna_benchmarking/pdb_structures/
+nc_rna_benchmarking/rna_pdbs_min*.accessions.csv
+nc_rna_benchmarking/rna_pdbs_min*.entities.tsv

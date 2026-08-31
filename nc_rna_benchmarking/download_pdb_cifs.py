@@ -102,7 +102,9 @@ def download_record(record, outdir, overwrite=False):
         status = "downloaded"
 
     metadata_path = entry_dir / "metadata.json"
-    metadata_path.write_text(json.dumps(record | {"url": url, "cif": str(cif_path)}, indent=2) + "\n")
+    metadata = dict(record)
+    metadata.update({"url": url, "cif": str(cif_path)})
+    metadata_path.write_text(json.dumps(metadata, indent=2) + "\n")
 
     return {
         "pdb_id": pdb_id,

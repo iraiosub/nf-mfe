@@ -40,6 +40,8 @@ Notes
 * Residues missing from the model (disordered expansion segments) are kept as
   NaN rows/cols so you can mask them rather than silently shifting index.
   For mmCIF inputs, `_pdbx_poly_seq_scheme` provides the authoritative mapping.
+* Centroid bins default to requiring at least 80% modelled residues. Use
+  --min-bin-modelled-fraction 0 for exact historical KARR-seq behavior.
 * Each bin directory contains a `.lookup.tsv` giving residue -> matrix row, so
   chimeric-read midpoints can be mapped onto the matrix without recomputing
   offsets by hand:
@@ -458,7 +460,7 @@ def mask_centroids_by_modelled_fraction(centroids, rows, min_fraction):
     out = centroids.copy()
     masked = 0
     for row in rows:
-        if row["modelled_fraction"] < min_fraction and np.isfinite(out[row["row"]]).all():
+        if row["modelled_fraction"] < min_fraction:
             out[row["row"]] = np.nan
             masked += 1
     return out, masked
@@ -581,6 +583,20 @@ def write_lookup_tsv(path, row_ids, resid_labels, coords, bin_size):
         fh.write("seq_id\tresid\trow\tmodelled\n")
         for idx, (seq_id, label) in enumerate(zip(row_ids, resid_labels)):
             fh.write(f"{seq_id}\t{label}\t{idx // bin_size}\t{int(modelled[idx])}\n")
+
+
+def write_chain_coverage_tsv(path, rows):
+    with path.open("w") as fh:
+        fh.write(
+            "tag\tchain\tlabel\tentity_id\tspan\trows\tmodelled\tunmodelled\t"
+            "modelled_fraction\taxis_source\tstatus\n"
+        )
+        for row in rows:
+            fh.write(
+                f"{row['tag']}\t{row['chain']}\t{row['label']}\t{row['entity_id']}\t"
+                f"{row['span']}\t{row['rows']}\t{row['modelled']}\t{row['unmodelled']}\t"
+                f"{row['modelled_fraction']:.6g}\t{row['axis_source']}\t{row['status']}\n"
+            )
 
 
 def plot_distance_map(path, D, tag, bin_size, plot_max_size, reduce_mode, cutoff):
@@ -732,9 +748,10 @@ def process_cif(cif_path, outdir, args, bins, logging_deferred=None):
 
     logging.info("reading structure %s", cif_path)
     logging.info(
-        "atom=%s reduce=%s centroid_weight=%s min_len=%d bins=%s min_sep=%d min_bin_modelled_fraction=%.3g plots=%s",
+        "atom=%s reduce=%s centroid_weight=%s min_len=%d min_chain_modelled_fraction=%.3g bins=%s min_sep=%d min_bin_modelled_fraction=%.3g plots=%s",
         args.atom, args.reduce, args.centroid_weight, args.min_len,
-        bins, args.min_separation, args.min_bin_modelled_fraction, not args.no_plots,
+        args.min_chain_modelled_fraction, bins, args.min_separation,
+        args.min_bin_modelled_fraction, not args.no_plots,
     )
     if args.karr_seq:
         logging.info("KARR-seq preset active (Wu et al. 2024: 5-nt window centroids)")
@@ -748,6 +765,7 @@ def process_cif(cif_path, outdir, args, bins, logging_deferred=None):
             "do not put different bin sizes on a shared colour scale"
         )
 
+    chain_coverage_rows = []
     entity_metadata = parse_entity_metadata(cif_path)
     logging.info(
         "read entity metadata: %d entities, %d polymer types, %d asym mappings",
@@ -828,12 +846,37 @@ def process_cif(cif_path, outdir, args, bins, logging_deferred=None):
 
         chain_tag = f"{label}_chain{chain.name}"
         n_placed = int(np.isfinite(xyz).all(axis=1).sum())
-        write_fasta(outdir / f"{chain_tag}.fa", chain_tag, offset, seq, n_placed)
-        logging.info(
-            "chain=%s label=%s label_source=%s entity=%s span=%d rows=%d placed=%d unmodelled=%d axis=%s first_seq_id=%s",
-            chain.name, label, label_source, entity_id or "", span, len(seq), n_placed, len(seq) - n_placed,
-            axis_source, offset,
+        chain_fraction = n_placed / len(seq) if seq else 0.0
+        chain_status = "kept"
+        if chain_fraction < args.min_chain_modelled_fraction:
+            chain_status = "skipped_low_modelled_fraction"
+        chain_coverage_rows.append(
+            {
+                "tag": chain_tag,
+                "chain": chain.name,
+                "label": label,
+                "entity_id": entity_id or "",
+                "span": span,
+                "rows": len(seq),
+                "modelled": n_placed,
+                "unmodelled": len(seq) - n_placed,
+                "modelled_fraction": chain_fraction,
+                "axis_source": axis_source,
+                "status": chain_status,
+            }
         )
+        logging.info(
+            "chain=%s label=%s label_source=%s entity=%s span=%d rows=%d placed=%d unmodelled=%d modelled_fraction=%.3f axis=%s first_seq_id=%s",
+            chain.name, label, label_source, entity_id or "", span, len(seq), n_placed, len(seq) - n_placed,
+            chain_fraction, axis_source, offset,
+        )
+        if chain_status != "kept":
+            logging.warning(
+                "skipping %s: modelled fraction %.3f < %.3f",
+                chain_tag, chain_fraction, args.min_chain_modelled_fraction,
+            )
+            continue
+        write_fasta(outdir / f"{chain_tag}.fa", chain_tag, offset, seq, n_placed)
 
         D_full = None
         if args.reduce in {"min", "contact"}:
@@ -893,6 +936,8 @@ def process_cif(cif_path, outdir, args, bins, logging_deferred=None):
                 tag, D.shape, args.reduce, finite,
             )
 
+    write_chain_coverage_tsv(outdir / "chain_coverage.tsv", chain_coverage_rows)
+    logging.info("wrote chain coverage table: %s", outdir / "chain_coverage.tsv")
     logging.info("done; wrote outputs to %s", outdir)
     return outdir
 
@@ -917,7 +962,20 @@ def build_parser():
     )
     ap.add_argument("--overwrite-downloads", action="store_true", help="re-download existing CSV-mode CIFs")
     ap.add_argument("--atom", default=None, help="C1' (default), P, or 'centroid'")
-    ap.add_argument("--min-len", type=int, default=100)
+    ap.add_argument(
+        "--min-len",
+        "--min-modelled-residues",
+        dest="min_len",
+        type=int,
+        default=100,
+        help="minimum observed/modelled nucleotide residues in a chain",
+    )
+    ap.add_argument(
+        "--min-chain-modelled-fraction",
+        type=float,
+        default=0.0,
+        help="skip chains with less than this fraction of the full sequence modelled",
+    )
     ap.add_argument(
         "--bins",
         type=parse_bins,
@@ -952,8 +1010,8 @@ def build_parser():
     ap.add_argument(
         "--min-bin-modelled-fraction",
         type=float,
-        default=0.0,
-        help="for --reduce centroid, NaN out bins with less than this resolved/modelled fraction",
+        default=None,
+        help="for --reduce centroid, NaN out bins below this resolved/modelled fraction (default: 0.8)",
     )
     ap.add_argument(
         "--min-separation",
@@ -964,7 +1022,7 @@ def build_parser():
     ap.add_argument(
         "--karr-seq",
         action="store_true",
-        help="preset: --bins 1,5 --atom centroid --centroid-weight atom --reduce centroid",
+        help="preset: --bins 1,5 --atom centroid --centroid-weight atom --reduce centroid; centroid bins default to 0.8 modelled fraction",
     )
     ap.add_argument(
         "--label-from-chain",
@@ -1007,8 +1065,14 @@ def main():
         logging_deferred = None
 
     bins = sorted(set(args.bin)) if args.bin else args.bins
+    if args.min_bin_modelled_fraction is None:
+        args.min_bin_modelled_fraction = 0.8 if args.reduce == "centroid" else 0.0
     if any(bin_size < 1 for bin_size in bins):
         ap.error("bin sizes must be >= 1")
+    if args.min_len < 1:
+        ap.error("--min-modelled-residues must be >= 1")
+    if not 0 <= args.min_chain_modelled_fraction <= 1:
+        ap.error("--min-chain-modelled-fraction must be between 0 and 1")
     if args.reduce == "contact" and args.contact_cutoff <= 0:
         ap.error("--contact-cutoff must be > 0")
     if not 0 <= args.min_bin_modelled_fraction <= 1:
@@ -1081,7 +1145,7 @@ def main():
 
     plot_note = " and PNG plots" if not args.no_plots else ""
     print(
-        "Each run folder contains per-chain .fa files; each bin folder contains "
+        "Each run folder contains chain_coverage.tsv and per-chain .fa files; each bin folder contains "
         f".dist.npy, .xyz.npy, .bins.tsv, .lookup.tsv{plot_note}."
     )
 

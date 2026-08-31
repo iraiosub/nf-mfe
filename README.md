@@ -241,7 +241,9 @@ The finder filters on RCSB's deposited polymer sequence length
 with coordinates. That is deliberate: it finds candidate structures before the
 CIF files are downloaded. Missing/resolved residue coverage is then handled by
 the distance-map scripts from the actual coordinate tables and
-`_pdbx_poly_seq_scheme`.
+`_pdbx_poly_seq_scheme`. In other words, the search step asks "is this deposited
+RNA long enough to be worth downloading?", while the distance-map step asks
+"does this chain/bin actually have enough modelled coordinates to use?"
 
 For an audit table with exact sequence lengths, entity descriptions, chain IDs,
 source organisms, entry-level methods, and resolution, add:
@@ -459,7 +461,7 @@ actual run folder is named automatically from the CIF stem and bin sizes.
 The KARR-seq preset expands to:
 
 ```bash
---bins 1,5 --atom centroid --centroid-weight atom --reduce centroid
+--bins 1,5 --atom centroid --centroid-weight atom --reduce centroid --min-bin-modelled-fraction 0.8
 ```
 
 This means:
@@ -489,8 +491,7 @@ Additional modes:
 python nc_rna_benchmarking/rrna_dist_karrseq.py 4V6X.cif \
   --bins 1,5,10 \
   --atom centroid \
-  --reduce centroid \
-  --min-bin-modelled-fraction 0.8
+  --reduce centroid
 
 # Closest nucleotide pair between each pair of windows
 python nc_rna_benchmarking/rrna_dist_karrseq.py 4V6X.cif \
@@ -525,10 +526,22 @@ that bin, which is useful when mapping chimeric-read arm midpoints onto the
 structure matrix.
 
 The binned `*.bins.tsv` file includes `modelled_fraction`, the fraction of each
-window that actually has coordinates. For centroid reduction, use
-`--min-bin-modelled-fraction` to drop poorly resolved windows from centroid
-distance calculations. For example, `--min-bin-modelled-fraction 0.8` turns a
-5-nt window into `NaN` unless at least four of its five residues are modelled.
+window that actually has coordinates. For centroid reduction, the script now
+defaults to `--min-bin-modelled-fraction 0.8`, so a 5-nt window becomes `NaN`
+unless at least four of its five residues are modelled. Use
+`--min-bin-modelled-fraction 0` only when you need exact historical KARR-seq
+centroid behaviour.
+
+Each run folder also includes `chain_coverage.tsv`, which records the full
+sequence length, modelled residue count, unmodelled residue count, and modelled
+fraction for every RNA chain. To skip chains that are too incomplete overall,
+add a chain-level threshold:
+
+```bash
+python nc_rna_benchmarking/rrna_dist_karrseq.py 4V6X.cif \
+  --karr-seq \
+  --min-chain-modelled-fraction 0.8
+```
 
 ## Notes to self
 

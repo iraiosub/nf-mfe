@@ -18,6 +18,7 @@ import logging
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import lru_cache
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -25,15 +26,19 @@ from urllib.request import Request, urlopen
 
 SEARCH_URL = "https://search.rcsb.org/rcsbsearch/v2/query"
 POLYMER_ENTITY_URL = "https://data.rcsb.org/rest/v1/core/polymer_entity/{pdb_id}/{entity_id}"
+ENTRY_URL = "https://data.rcsb.org/rest/v1/core/entry/{pdb_id}"
 DEFAULT_ROWS = 1000
 EXPERIMENTAL_METHODS = {
     "any": None,
-    "cryo-em": "EM",
+    "cryo-em": "ELECTRON MICROSCOPY",
 }
 
 
-def default_prefix(min_length, experimental_method):
+def default_prefix(min_length, experimental_method, max_resolution=None):
     suffix = "" if experimental_method == "any" else "_cryoem"
+    if max_resolution is not None:
+        resolution = ("%g" % max_resolution).replace(".", "p")
+        suffix += "_resle%sA" % resolution
     return Path(__file__).resolve().parent / ("rna_pdbs_min%d%s" % (min_length, suffix))
 
 
@@ -68,7 +73,7 @@ def request_json(req, timeout, retries):
     raise RuntimeError("RCSB request failed after %d attempts: %s" % (retries + 1, last_exc))
 
 
-def build_search_query(min_length, experimental_method, start, rows):
+def build_search_query(min_length, experimental_method, max_resolution, start, rows):
     nodes = [
         {
             "type": "terminal",
@@ -97,9 +102,21 @@ def build_search_query(min_length, experimental_method, start, rows):
                 "type": "terminal",
                 "service": "text",
                 "parameters": {
-                    "attribute": "rcsb_entry_info.experimental_method",
+                    "attribute": "exptl.method",
                     "operator": "exact_match",
                     "value": method_value,
+                },
+            }
+        )
+    if max_resolution is not None:
+        nodes.append(
+            {
+                "type": "terminal",
+                "service": "text",
+                "parameters": {
+                    "attribute": "rcsb_entry_info.resolution_combined",
+                    "operator": "less_or_equal",
+                    "value": max_resolution,
                 },
             }
         )
@@ -125,13 +142,13 @@ def parse_polymer_entity_id(identifier):
     return pdb_id.upper(), entity_id
 
 
-def find_rna_entities(min_length, experimental_method, rows, limit, timeout, retries):
+def find_rna_entities(min_length, experimental_method, max_resolution, rows, limit, timeout, retries):
     hits = []
     start = 0
     total = None
 
     while True:
-        payload = build_search_query(min_length, experimental_method, start, rows)
+        payload = build_search_query(min_length, experimental_method, max_resolution, start, rows)
         response = post_json(SEARCH_URL, payload, timeout, retries)
         if response is None:
             logging.info("RCSB returned no hits")
@@ -140,11 +157,12 @@ def find_rna_entities(min_length, experimental_method, rows, limit, timeout, ret
         if total is None:
             total = int(response.get("total_count", 0))
             method_label = "any method" if experimental_method == "any" else experimental_method
+            resolution_label = (
+                "any resolution" if max_resolution is None else "resolution <= %.3g A" % max_resolution
+            )
             logging.info(
-                "RCSB reported %d RNA polymer entities >= %d nt (%s)",
-                total,
-                min_length,
-                method_label,
+                "RCSB reported %d RNA polymer entities >= %d nt (%s, %s)",
+                total, min_length, method_label, resolution_label,
             )
 
         result_set = response.get("result_set", [])
@@ -162,6 +180,7 @@ def find_rna_entities(min_length, experimental_method, rows, limit, timeout, ret
                     "score": item.get("score", ""),
                     "query_min_length": min_length,
                     "query_experimental_method": experimental_method,
+                    "query_max_resolution": "" if max_resolution is None else max_resolution,
                 }
             )
             if limit and len(hits) >= limit:
@@ -207,6 +226,24 @@ def entity_sort_key(value):
         return (1, value)
 
 
+@lru_cache(maxsize=None)
+def fetch_entry_metadata(pdb_id, timeout, retries):
+    data = get_json(ENTRY_URL.format(pdb_id=pdb_id), timeout, retries) or {}
+    methods = [
+        item.get("method", "")
+        for item in data.get("exptl", []) or []
+        if item.get("method")
+    ]
+    resolutions = data.get("rcsb_entry_info", {}).get("resolution_combined", []) or []
+    return {
+        "entry_title": data.get("struct", {}).get("title", ""),
+        "entry_experimental_method_summary": data.get("rcsb_entry_info", {}).get("experimental_method", ""),
+        "entry_experimental_methods": "; ".join(methods),
+        "entry_resolution": ",".join("%g" % value for value in resolutions),
+        "cryo_em_method_present": int("ELECTRON MICROSCOPY" in methods),
+    }
+
+
 def fetch_entity_metadata(row, timeout, retries):
     url = POLYMER_ENTITY_URL.format(pdb_id=row["pdb_id"], entity_id=row["entity_id"])
     data = get_json(url, timeout, retries)
@@ -219,6 +256,7 @@ def fetch_entity_metadata(row, timeout, retries):
         organisms = [organisms]
 
     enriched = dict(row)
+    enriched.update(fetch_entry_metadata(row["pdb_id"], timeout, retries))
     enriched.update(
         {
             "entity_polymer_type": entity_poly.get("rcsb_entity_polymer_type", ""),
@@ -279,7 +317,13 @@ def write_entity_manifest(path, rows):
         "rcsb_id",
         "query_min_length",
         "query_experimental_method",
+        "query_max_resolution",
         "score",
+        "entry_title",
+        "entry_experimental_method_summary",
+        "entry_experimental_methods",
+        "entry_resolution",
+        "cryo_em_method_present",
         "entity_polymer_type",
         "entity_sequence_length",
         "description",
@@ -333,6 +377,11 @@ def build_parser():
         action="store_true",
         help="shortcut for --experimental-method cryo-em",
     )
+    ap.add_argument(
+        "--max-resolution",
+        type=float,
+        help="optional maximum entry resolution in Angstroms, using RCSB resolution_combined",
+    )
     ap.add_argument("--accessions-out", type=Path, help="downstream-compatible PDB accession CSV")
     ap.add_argument("--manifest-out", type=Path, help="entity-level TSV manifest")
     ap.add_argument(
@@ -345,7 +394,7 @@ def build_parser():
     ap.add_argument(
         "--fetch-metadata",
         action="store_true",
-        help="enrich the TSV with exact entity lengths, descriptions, chains, and organisms",
+        help="enrich the TSV with entity details plus entry methods/resolution",
     )
     ap.add_argument("--metadata-workers", type=int, default=4, help="parallel metadata requests")
     ap.add_argument("--timeout", type=float, default=30.0, help="network timeout in seconds")
@@ -374,6 +423,8 @@ def main():
         ap.error("--min-rna-length must be >= 1")
     if args.cryo_em_only:
         args.experimental_method = "cryo-em"
+    if args.max_resolution is not None and args.max_resolution <= 0:
+        ap.error("--max-resolution must be > 0")
     if args.rows < 1:
         ap.error("--rows must be >= 1")
     if args.limit is not None and args.limit < 1:
@@ -386,7 +437,9 @@ def main():
         format="%(asctime)s %(levelname)s %(message)s",
     )
 
-    prefix = args.out_prefix or default_prefix(args.min_rna_length, args.experimental_method)
+    prefix = args.out_prefix or default_prefix(
+        args.min_rna_length, args.experimental_method, args.max_resolution
+    )
     accessions_out = args.accessions_out or prefix.with_suffix(".accessions.csv")
     manifest_out = args.manifest_out or prefix.with_suffix(".entities.tsv")
 
@@ -394,6 +447,7 @@ def main():
         entity_rows = find_rna_entities(
             args.min_rna_length,
             args.experimental_method,
+            args.max_resolution,
             args.rows,
             args.limit,
             args.timeout,

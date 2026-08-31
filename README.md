@@ -200,7 +200,21 @@ python nc_rna_benchmarking/find_rna_pdbs.py \
 
 `--cryo-em-only` is equivalent. The script intentionally only exposes
 `cryo-em` as a named method filter right now, because that is the structure
-class used for these physical distance benchmarks.
+class used for these physical distance benchmarks. The cryo-EM filter uses the
+RCSB/mmCIF experimental method field `exptl.method == ELECTRON MICROSCOPY`, so
+entries that also report another method are still eligible. In mixed-method
+entries, there is still one downloaded coordinate file; the filter makes sure
+the entry is included because electron microscopy is one of its reported
+methods.
+
+You can also require a maximum reported structure resolution:
+
+```bash
+python nc_rna_benchmarking/find_rna_pdbs.py \
+  --min-rna-length 200 \
+  --experimental-method cryo-em \
+  --max-resolution 4.0
+```
 
 This writes two files:
 
@@ -222,8 +236,15 @@ downloader or to `rrna_dist_karrseq.py --accessions-csv`. The `.entities.tsv`
 file keeps the entity-level provenance, because one PDB entry can contain more
 than one long RNA chain.
 
+The finder filters on RCSB's deposited polymer sequence length
+(`entity_poly.rcsb_sample_sequence_length`), not the number of residues resolved
+with coordinates. That is deliberate: it finds candidate structures before the
+CIF files are downloaded. Missing/resolved residue coverage is then handled by
+the distance-map scripts from the actual coordinate tables and
+`_pdbx_poly_seq_scheme`.
+
 For an audit table with exact sequence lengths, entity descriptions, chain IDs,
-and source organisms, add:
+source organisms, entry-level methods, and resolution, add:
 
 ```bash
 python nc_rna_benchmarking/find_rna_pdbs.py \
@@ -468,7 +489,8 @@ Additional modes:
 python nc_rna_benchmarking/rrna_dist_karrseq.py 4V6X.cif \
   --bins 1,5,10 \
   --atom centroid \
-  --reduce centroid
+  --reduce centroid \
+  --min-bin-modelled-fraction 0.8
 
 # Closest nucleotide pair between each pair of windows
 python nc_rna_benchmarking/rrna_dist_karrseq.py 4V6X.cif \
@@ -501,6 +523,12 @@ The reduction modes answer different biological/computational questions:
 file maps each polymer `seq_id` / deposited residue label to the matrix row for
 that bin, which is useful when mapping chimeric-read arm midpoints onto the
 structure matrix.
+
+The binned `*.bins.tsv` file includes `modelled_fraction`, the fraction of each
+window that actually has coordinates. For centroid reduction, use
+`--min-bin-modelled-fraction` to drop poorly resolved windows from centroid
+distance calculations. For example, `--min-bin-modelled-fraction 0.8` turns a
+5-nt window into `NaN` unless at least four of its five residues are modelled.
 
 ## Notes to self
 

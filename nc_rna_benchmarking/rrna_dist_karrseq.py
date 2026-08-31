@@ -451,6 +451,19 @@ def window_centroids(coords, weights, bin_size, centroid_weight="atom"):
     return out
 
 
+def mask_centroids_by_modelled_fraction(centroids, rows, min_fraction):
+    if min_fraction <= 0:
+        return centroids, 0
+
+    out = centroids.copy()
+    masked = 0
+    for row in rows:
+        if row["modelled_fraction"] < min_fraction and np.isfinite(out[row["row"]]).all():
+            out[row["row"]] = np.nan
+            masked += 1
+    return out, masked
+
+
 def block_min_distance(D, bin_size):
     """Reduce an nt-level distance matrix to bins by min distance per block."""
     pad = (-len(D)) % bin_size
@@ -522,6 +535,8 @@ def bin_row_metadata(seq, coords, bin_size, row_ids, resid_labels):
         end_idx = min(start_idx + bin_size, n)
         window = coords[start_idx:end_idx]
         window_labels = [label for label in resid_labels[start_idx:end_idx] if label]
+        n_modelled = int(np.isfinite(window).all(axis=1).sum())
+        width = end_idx - start_idx
         rows.append(
             {
                 "row": row_idx,
@@ -529,8 +544,9 @@ def bin_row_metadata(seq, coords, bin_size, row_ids, resid_labels):
                 "seq_id_end": row_ids[end_idx - 1],
                 "resid_start": window_labels[0] if window_labels else "",
                 "resid_end": window_labels[-1] if window_labels else "",
-                "modelled": int(np.isfinite(window).all(axis=1).sum()),
-                "window": end_idx - start_idx,
+                "modelled": n_modelled,
+                "window": width,
+                "modelled_fraction": n_modelled / width,
                 "seq": seq[start_idx:end_idx],
             }
         )
@@ -546,12 +562,15 @@ def write_fasta(path, tag, offset, seq, modelled):
 
 def write_bins_tsv(path, rows):
     with path.open("w") as fh:
-        fh.write("row\tseq_id_start\tseq_id_end\tresid_start\tresid_end\tmodelled\twindow\tseq\n")
+        fh.write(
+            "row\tseq_id_start\tseq_id_end\tresid_start\tresid_end\t"
+            "modelled\twindow\tmodelled_fraction\tseq\n"
+        )
         for row in rows:
             fh.write(
                 f"{row['row']}\t{row['seq_id_start']}\t{row['seq_id_end']}\t"
                 f"{row['resid_start']}\t{row['resid_end']}\t{row['modelled']}\t"
-                f"{row['window']}\t{row['seq']}\n"
+                f"{row['window']}\t{row['modelled_fraction']:.6g}\t{row['seq']}\n"
             )
 
 
@@ -713,9 +732,9 @@ def process_cif(cif_path, outdir, args, bins, logging_deferred=None):
 
     logging.info("reading structure %s", cif_path)
     logging.info(
-        "atom=%s reduce=%s centroid_weight=%s min_len=%d bins=%s min_sep=%d plots=%s",
+        "atom=%s reduce=%s centroid_weight=%s min_len=%d bins=%s min_sep=%d min_bin_modelled_fraction=%.3g plots=%s",
         args.atom, args.reduce, args.centroid_weight, args.min_len,
-        bins, args.min_separation, not args.no_plots,
+        bins, args.min_separation, args.min_bin_modelled_fraction, not args.no_plots,
     )
     if args.karr_seq:
         logging.info("KARR-seq preset active (Wu et al. 2024: 5-nt window centroids)")
@@ -829,6 +848,14 @@ def process_cif(cif_path, outdir, args, bins, logging_deferred=None):
             rows = bin_row_metadata(seq, xyz, bin_size, row_ids, resid_labels)
 
             if args.reduce == "centroid":
+                out_xyz, masked_bins = mask_centroids_by_modelled_fraction(
+                    out_xyz, rows, args.min_bin_modelled_fraction
+                )
+                if masked_bins:
+                    logging.info(
+                        "%s masked %d centroid bins below modelled fraction %.3g",
+                        tag, masked_bins, args.min_bin_modelled_fraction,
+                    )
                 D = cdist(out_xyz, out_xyz)
             elif args.reduce == "min":
                 D = D_full if bin_size == 1 else block_min_distance(D_full, bin_size)
@@ -923,6 +950,12 @@ def build_parser():
         help="Angstrom threshold for --reduce contact; CALIBRATE THIS, see --help notes",
     )
     ap.add_argument(
+        "--min-bin-modelled-fraction",
+        type=float,
+        default=0.0,
+        help="for --reduce centroid, NaN out bins with less than this resolved/modelled fraction",
+    )
+    ap.add_argument(
         "--min-separation",
         type=int,
         default=0,
@@ -978,6 +1011,8 @@ def main():
         ap.error("bin sizes must be >= 1")
     if args.reduce == "contact" and args.contact_cutoff <= 0:
         ap.error("--contact-cutoff must be > 0")
+    if not 0 <= args.min_bin_modelled_fraction <= 1:
+        ap.error("--min-bin-modelled-fraction must be between 0 and 1")
     if args.masked_diagonal_width < 0:
         ap.error("--masked-diagonal-width must be >= 0")
 

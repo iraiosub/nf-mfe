@@ -16,6 +16,7 @@ import csv
 import hashlib
 import json
 import logging
+import re
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -535,6 +536,176 @@ def sequence_cluster_key(row):
     return "%s|entity:%s" % (organism, row["rcsb_id"])
 
 
+RIBOSOMAL_KEYWORDS = ("ribosomal", "rrna", "ribosome", "ssu", "lsu")
+RIBOSOMAL_SUBUNIT_RE = re.compile(
+    r"(^|[^0-9])(5\.8s|16s|18s|23s|25s|28s|5s|30s|40s|50s|60s|70s|80s)([^a-z]|$)", re.I
+)
+# Deliberately no trailing \b: real-world descriptions run the S-value straight
+# into the molecule name ("16SrRNA", "23SRNA"), so only the leading edge of the
+# number is anchored.
+RRNA_SVALUE_RE = re.compile(r"\b(\d+(?:\.\d+)?)S", re.I)
+# These name the assembled ribosome particle (30S/50S -> bacterial SSU/LSU,
+# 40S/60S -> eukaryotic SSU/LSU, 70S/80S -> whole ribosome), not a single RNA
+# molecule, so a match here is never trusted as the molecule's own identity.
+PARTICLE_SVALUES = {"30", "40", "50", "60", "70", "80"}
+NON_RIBOSOMAL_TYPE_RULES = (
+    ("spliceosomal RNA", lambda text: "snrna" in text or "spliceosom" in text),
+    ("group I/II intron", lambda text: "group i intron" in text or "group ii intron" in text),
+    ("telomerase RNA", lambda text: "telomerase" in text or "tlc1" in text),
+    ("riboswitch", lambda text: "riboswitch" in text),
+    ("ribozyme", lambda text: "ribozyme" in text),
+    ("tRNA", lambda text: "trna" in text),
+    ("mRNA", lambda text: "mrna" in text),
+    ("viral/phage RNA", lambda text: any(kw in text for kw in ("phage", "viral", "virion", "virus"))),
+)
+
+
+def _extract_rrna_svalue(text):
+    values = RRNA_SVALUE_RE.findall(text)
+    if not values:
+        return None
+    molecule_level = [v for v in values if v not in PARTICLE_SVALUES]
+    return (molecule_level[0], True) if molecule_level else (values[0], False)
+
+
+def _label_ribosomal(source_text, combined_lower, trust_svalue):
+    mito = " (mt)" if ("mitochondrial" in combined_lower or re.search(r"\bmt-", combined_lower)) else ""
+    extraction = _extract_rrna_svalue(source_text) if trust_svalue else None
+    if extraction:
+        value, is_molecule_level = extraction
+        if is_molecule_level:
+            return "%sS rRNA%s" % (value.upper(), mito)
+        if value in ("30", "40"):
+            return "SSU rRNA (unspecified)%s" % mito
+        if value in ("50", "60"):
+            return "LSU rRNA (unspecified)%s" % mito
+        return "ribosomal RNA (unspecified)%s" % mito
+    lowered = source_text.lower()
+    if "small subunit" in lowered or "ssu" in lowered:
+        return "SSU rRNA (unspecified)%s" % mito
+    if "large subunit" in lowered or "lsu" in lowered:
+        return "LSU rRNA (unspecified)%s" % mito
+    return "ribosomal RNA (unspecified)%s" % mito
+
+
+def _classify_text(source_text, combined_lower, trust_svalue):
+    lowered = source_text.lower()
+    is_ribosomal = (
+        any(kw in lowered for kw in RIBOSOMAL_KEYWORDS)
+        or bool(RIBOSOMAL_SUBUNIT_RE.search(lowered))
+        or (trust_svalue and bool(RRNA_SVALUE_RE.search(source_text)))
+    )
+    if is_ribosomal:
+        return _label_ribosomal(source_text, combined_lower, trust_svalue)
+    for label, matches in NON_RIBOSOMAL_TYPE_RULES:
+        if matches(lowered):
+            return label
+    return None
+
+
+def classify_molecule_type(description, entry_title):
+    """Classify an RNA polymer entity by molecule identity.
+
+    The entity's own `description` is trusted first (it names that specific
+    chain, and any S-value in it is taken as the molecule's own identity).
+    `entry_title` describes the whole PDB entry/particle ("90S pre-ribosome",
+    "80S ribosome bound to mRNA") and is only consulted when the description
+    gives no signal at all -- and even then, a title S-value is never trusted
+    as a specific molecule name (it almost always names the particle, not a
+    single RNA chain within it), so title-derived hits land in an
+    "(unspecified)" bucket rather than guessing a number.
+    """
+    description = description or ""
+    entry_title = entry_title or ""
+    combined_lower = ("%s %s" % (description, entry_title)).lower()
+    return (
+        _classify_text(description, combined_lower, trust_svalue=True)
+        or _classify_text(entry_title, combined_lower, trust_svalue=False)
+        or "other/unclassified"
+    )
+
+
+def select_molecule_representatives(representative_rows, priority_species, other_species_count):
+    by_type = {}
+    ordered_types = []
+    for row in representative_rows:
+        mtype = classify_molecule_type(row.get("description"), row.get("entry_title"))
+        if mtype not in by_type:
+            by_type[mtype] = []
+            ordered_types.append(mtype)
+        by_type[mtype].append(row)
+
+    def best_of(rows):
+        return min(
+            rows,
+            key=lambda row: (
+                first_resolution_value(row.get("entry_resolution")),
+                -release_timestamp(row.get("entry_initial_release_date")),
+            ),
+        )
+
+    selected = []
+    for mtype in ordered_types:
+        by_organism = {}
+        for row in by_type[mtype]:
+            organism = row.get("source_organisms") or "unknown/synthetic"
+            by_organism.setdefault(organism, []).append(row)
+
+        picks = []
+        priority_rows = by_organism.pop(priority_species, None)
+        if priority_rows:
+            picks.append(("priority", best_of(priority_rows)))
+
+        other_best = sorted(
+            (best_of(rows) for rows in by_organism.values()),
+            key=lambda row: first_resolution_value(row.get("entry_resolution")),
+        )
+        for row in other_best[:other_species_count]:
+            picks.append(("other", row))
+
+        for rank, (reason, row) in enumerate(picks, start=1):
+            enriched = dict(row)
+            enriched.update(
+                {
+                    "molecule_type": mtype,
+                    "selection_reason": reason,
+                    "selection_rank": rank,
+                }
+            )
+            selected.append(enriched)
+
+    logging.info(
+        "selected %d molecule-type representatives across %d molecule types",
+        len(selected), len(ordered_types),
+    )
+    return selected
+
+
+def collapse_selected_accessions(selected_rows):
+    grouped = {}
+    ordered_pdb_ids = []
+    for row in selected_rows:
+        pdb_id = row["pdb_id"]
+        if pdb_id not in grouped:
+            grouped[pdb_id] = []
+            ordered_pdb_ids.append(pdb_id)
+        grouped[pdb_id].append(row)
+
+    records = []
+    for pdb_id in ordered_pdb_ids:
+        rows = grouped[pdb_id]
+        entity_ids = sorted({row["entity_id"] for row in rows}, key=entity_sort_key)
+        labels = sorted(
+            {
+                "%s (%s)" % (row["molecule_type"], row.get("source_organisms") or "unknown")
+                for row in rows
+            }
+        )
+        metadata = "curated representative; entities %s; %s" % (" ".join(entity_ids), "; ".join(labels))
+        records.append({"pdb_id": pdb_id, "metadata": metadata})
+    return records
+
+
 def select_sequence_representatives(entity_rows, ranking):
     groups = {}
     ordered_keys = []
@@ -588,7 +759,7 @@ def write_accessions_csv(path, records):
             writer.writerow({"pdb_id": record["pdb_id"], "name": record["metadata"]})
 
 
-def write_entity_manifest(path, rows):
+def write_entity_manifest(path, rows, extra_fields=None):
     path.parent.mkdir(parents=True, exist_ok=True)
     fieldnames = [
         "pdb_id",
@@ -619,7 +790,7 @@ def write_entity_manifest(path, rows):
         "asym_ids",
         "source_organisms",
         "metadata_status",
-    ]
+    ] + list(extra_fields or [])
     with path.open("w", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=fieldnames, delimiter="\t", extrasaction="ignore")
         writer.writeheader()
@@ -681,9 +852,32 @@ def build_parser():
         default="newest",
         help="ranking used within exact-sequence groups (default: newest)",
     )
+    ap.add_argument(
+        "--priority-species",
+        default="Homo sapiens",
+        help="organism guaranteed a slot (if present) in the --representatives-selected output "
+        "(default: Homo sapiens); matched against RCSB's ncbi_scientific_name",
+    )
+    ap.add_argument(
+        "--other-species-count",
+        type=int,
+        default=2,
+        help="number of additional non-priority species kept per molecule type in the "
+        "--representatives-selected output, chosen by best resolution (default: 2)",
+    )
     ap.add_argument("--accessions-out", type=Path, help="downstream-compatible PDB accession CSV")
     ap.add_argument("--manifest-out", type=Path, help="entity-level TSV manifest")
     ap.add_argument("--representatives-out", type=Path, help="selected representative entity TSV")
+    ap.add_argument(
+        "--selected-out",
+        type=Path,
+        help="molecule-type-curated representative TSV (only written with --representatives)",
+    )
+    ap.add_argument(
+        "--selected-accessions-out",
+        type=Path,
+        help="accession CSV for the curated set (only written with --representatives)",
+    )
     ap.add_argument(
         "--out-prefix",
         type=Path,
@@ -734,6 +928,8 @@ def main():
         ap.error("--metadata-workers must be >= 1")
     if args.metadata_batch_size < 1:
         ap.error("--metadata-batch-size must be >= 1")
+    if args.other_species_count < 0:
+        ap.error("--other-species-count must be >= 0")
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
@@ -749,6 +945,8 @@ def main():
     accessions_out = args.accessions_out or prefix.with_suffix(".accessions.csv")
     manifest_out = args.manifest_out or prefix.with_suffix(".entities.tsv")
     representatives_out = args.representatives_out or prefix.with_suffix(".representatives.tsv")
+    selected_out = args.selected_out or prefix.with_suffix(".selected.tsv")
+    selected_accessions_out = args.selected_accessions_out or prefix.with_suffix(".selected.accessions.csv")
 
     try:
         entity_rows = find_rna_entities(
@@ -772,6 +970,7 @@ def main():
             )
 
         representative_rows = []
+        selected_rows = []
         if args.representatives:
             entity_rows, representative_rows = select_sequence_representatives(
                 entity_rows, args.representative_rank
@@ -783,6 +982,16 @@ def main():
                 representatives=True,
             )
             write_entity_manifest(representatives_out, representative_rows)
+
+            selected_rows = select_molecule_representatives(
+                representative_rows, args.priority_species, args.other_species_count
+            )
+            selected_records = collapse_selected_accessions(selected_rows)
+            write_entity_manifest(
+                selected_out, selected_rows,
+                extra_fields=["molecule_type", "selection_reason", "selection_rank"],
+            )
+            write_accessions_csv(selected_accessions_out, selected_records)
         else:
             records = collapse_accessions(entity_rows, args.min_rna_length, args.experimental_method)
 
@@ -803,6 +1012,9 @@ def main():
     if args.representatives:
         print("selected %d exact-sequence representatives" % len(representative_rows))
         print("wrote representatives manifest: %s" % representatives_out)
+        print("curated %d molecule-type representatives" % len(selected_rows))
+        print("wrote selected manifest: %s" % selected_out)
+        print("wrote selected accessions: %s" % selected_accessions_out)
     if download_manifest:
         print("download manifest: %s" % download_manifest)
     return 0

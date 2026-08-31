@@ -11,40 +11,14 @@ length/resolution/release-date spread of the cryo-EM (or mixed-method) hits.
 import argparse
 import csv
 import logging
-import re
 import sys
 from collections import Counter
 from pathlib import Path
 
 try:
-    from find_rna_pdbs import first_resolution_value
+    from find_rna_pdbs import classify_molecule_type, first_resolution_value
 except ImportError:
-    from nc_rna_benchmarking.find_rna_pdbs import first_resolution_value
-
-
-RIBOSOMAL_KEYWORDS = ("ribosomal", "rrna", "ribosome", "ssu", "lsu")
-RIBOSOMAL_SUBUNIT_RE = re.compile(
-    r"(^|[^0-9])(5\.8s|16s|18s|23s|25s|28s|5s|30s|40s|50s|60s|70s|80s)([^a-z]|$)", re.I
-)
-MOLECULE_TYPE_RULES = (
-    ("ribosomal RNA", lambda text: any(kw in text for kw in RIBOSOMAL_KEYWORDS) or bool(RIBOSOMAL_SUBUNIT_RE.search(text))),
-    ("spliceosomal RNA", lambda text: "snrna" in text or "spliceosom" in text),
-    ("group I/II intron", lambda text: "group i intron" in text or "group ii intron" in text),
-    ("telomerase RNA", lambda text: "telomerase" in text or "tlc1" in text),
-    ("riboswitch", lambda text: "riboswitch" in text),
-    ("ribozyme", lambda text: "ribozyme" in text),
-    ("tRNA", lambda text: "trna" in text),
-    ("mRNA", lambda text: "mrna" in text),
-    ("viral/phage RNA", lambda text: any(kw in text for kw in ("phage", "viral", "virion", "virus"))),
-)
-
-
-def classify_molecule_type(description, entry_title):
-    text = ("%s %s" % (description or "", entry_title or "")).lower()
-    for label, matches in MOLECULE_TYPE_RULES:
-        if matches(text):
-            return label
-    return "other/unclassified"
+    from nc_rna_benchmarking.find_rna_pdbs import classify_molecule_type, first_resolution_value
 
 
 def read_rows(path):
@@ -148,6 +122,79 @@ def build_figure(rows, out_path, title, top_organisms):
     plt.close(fig)
 
 
+def build_selected_figure(rows, out_path, title):
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    by_type = {}
+    for row in rows:
+        by_type.setdefault(row.get("molecule_type", "unknown"), []).append(row)
+    ordered_types = sorted(by_type)
+
+    fig_height = max(4.0, 0.7 * len(ordered_types) + 1.5)
+    fig, ax = plt.subplots(figsize=(13, fig_height), constrained_layout=True)
+    colors = {"priority": "#C44E52", "other": "#4C72B0"}
+    row_span = 0.34
+
+    for y, mtype in enumerate(ordered_types):
+        entries = sorted(by_type[mtype], key=lambda row: int(row.get("selection_rank") or 0))
+        n = len(entries)
+        for i, row in enumerate(entries):
+            resolution = first_resolution_value(row.get("entry_resolution"))
+            if resolution == float("inf"):
+                continue
+            reason = row.get("selection_reason", "other")
+            # Spread same-row points/labels vertically so close resolutions
+            # don't stack their annotations on top of each other.
+            yy = y + (0.0 if n == 1 else (i / (n - 1) - 0.5) * row_span)
+            ax.scatter(resolution, yy, color=colors.get(reason, "#55A868"), s=60, zorder=3)
+            label = "%s / %s / %.2gA" % (
+                row.get("pdb_id"), row.get("source_organisms") or "?", resolution,
+            )
+            ax.annotate(
+                label, (resolution, yy), textcoords="offset points", xytext=(8, 0),
+                va="center", fontsize=7,
+            )
+
+    ax.set_yticks(range(len(ordered_types)))
+    ax.set_yticklabels(ordered_types, fontsize=8)
+    ax.set_ylim(-1, len(ordered_types))
+    for y in range(len(ordered_types)):
+        ax.axhline(y, color="0.9", linewidth=0.6, zorder=0)
+    ax.set_xlabel("resolution (Angstrom, lower = better)")
+    ax.grid(axis="x", linestyle=":", alpha=0.5)
+    ax.set_title(title)
+
+    handles = [
+        plt.Line2D([0], [0], marker="o", linestyle="", color=colors["priority"], label="priority species"),
+        plt.Line2D([0], [0], marker="o", linestyle="", color=colors["other"], label="other species (best resolution)"),
+    ]
+    ax.legend(handles=handles, loc="lower right", fontsize=8)
+
+    fig.savefig(out_path, dpi=200)
+    plt.close(fig)
+
+
+def log_selected_summary(rows):
+    by_type = {}
+    for row in rows:
+        by_type.setdefault(row.get("molecule_type", "unknown"), []).append(row)
+    logging.info("%d curated rows across %d molecule types", len(rows), len(by_type))
+    for mtype in sorted(by_type):
+        parts = [
+            "%s(%s,%.3gA,%s)" % (
+                row.get("pdb_id"),
+                row.get("source_organisms") or "?",
+                first_resolution_value(row.get("entry_resolution")),
+                row.get("selection_reason"),
+            )
+            for row in sorted(by_type[mtype], key=lambda row: int(row.get("selection_rank") or 0))
+        ]
+        logging.info("%s: %s", mtype, ", ".join(parts))
+
+
 def log_summary(rows):
     n = len(rows)
     pdb_ids = {row.get("pdb_id") for row in rows}
@@ -202,11 +249,15 @@ def main():
         logging.error("no rows in %s", args.manifest)
         return 1
 
-    log_summary(rows)
-
     out_path = args.out or args.manifest.with_name(args.manifest.stem + ".summary.png")
     title = args.title or args.manifest.name
-    build_figure(rows, out_path, title, args.top_organisms)
+
+    if "molecule_type" in rows[0]:
+        log_selected_summary(rows)
+        build_selected_figure(rows, out_path, title)
+    else:
+        log_summary(rows)
+        build_figure(rows, out_path, title, args.top_organisms)
     print("wrote summary figure: %s" % out_path)
     return 0
 

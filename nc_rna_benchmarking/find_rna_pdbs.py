@@ -528,10 +528,11 @@ def representative_sort_key(row, ranking):
 
 
 def sequence_cluster_key(row):
+    organism = row.get("source_organisms", "") or "unknown organism"
     digest = row.get("sequence_hash", "")
     if digest:
-        return "sha1:%s" % digest
-    return "entity:%s" % row["rcsb_id"]
+        return "%s|sha1:%s" % (organism, digest)
+    return "%s|entity:%s" % (organism, row["rcsb_id"])
 
 
 def select_sequence_representatives(entity_rows, ranking):

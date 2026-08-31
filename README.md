@@ -230,6 +230,28 @@ nc_rna_benchmarking/rna_pdbs_min200_cryoem.accessions.csv
 nc_rna_benchmarking/rna_pdbs_min200_cryoem.entities.tsv
 ```
 
+To clean this down automatically to one representative structure per exact
+deposited RNA sequence, add `--representatives`:
+
+```bash
+python nc_rna_benchmarking/find_rna_pdbs.py \
+  --min-rna-length 200 \
+  --experimental-method cryo-em \
+  --representatives
+```
+
+This fetches RCSB metadata in batches, hashes each canonical RNA sequence, groups
+identical sequences, and selects one representative entity per sequence group.
+By default the newest released entry wins inside each exact-sequence group. For
+structure-quality-first selection, use `--representative-rank best-resolution`.
+The cleaned downstream CSV is written as:
+
+```text
+nc_rna_benchmarking/rna_pdbs_min200_cryoem_representatives.accessions.csv
+nc_rna_benchmarking/rna_pdbs_min200_cryoem_representatives.representatives.tsv
+nc_rna_benchmarking/rna_pdbs_min200_cryoem_representatives.entities.tsv
+```
+
 The `.accessions.csv` file is the downstream-compatible file: first column PDB
 ID, second column a short metadata label. It can be passed directly to the CIF
 downloader or to `rrna_dist_karrseq.py --accessions-csv`. The `.entities.tsv`
@@ -273,6 +295,13 @@ Or download the automatically discovered long-RNA set:
 ```bash
 python nc_rna_benchmarking/download_pdb_cifs.py \
   nc_rna_benchmarking/rna_pdbs_min200.accessions.csv
+```
+
+Or download only the exact-sequence representative cryo-EM set:
+
+```bash
+python nc_rna_benchmarking/download_pdb_cifs.py \
+  nc_rna_benchmarking/rna_pdbs_min200_cryoem_representatives.accessions.csv
 ```
 
 `find_rna_pdbs.py` can also do the download in the same command, but this may

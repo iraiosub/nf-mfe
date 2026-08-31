@@ -170,6 +170,39 @@ conda env create -f nc_rna_benchmarking/environment.yml
 conda activate nc-rna-benchmarking
 ```
 
+If you have several PDB accessions to fetch, create a CSV with the accession in
+the first column and an optional name/metadata field in the second column:
+
+```csv
+pdb_id,name
+8QOI,human 80S ribosome
+9Q16,TERC / human telomerase RNA
+6QX9,U1 snRNA
+```
+
+An example accession list is provided at
+`nc_rna_benchmarking/pdb_accessions.example.csv`.
+
+Download all listed structures into organized per-accession folders:
+
+```bash
+python nc_rna_benchmarking/download_pdb_cifs.py nc_rna_benchmarking/pdb_accessions.example.csv
+```
+
+By default this writes to `nc_rna_benchmarking/pdb_structures/`, which is
+ignored by Git:
+
+```text
+nc_rna_benchmarking/pdb_structures/
+  manifest.tsv
+  8QOI_human_80S_ribosome/
+    8QOI.cif
+    metadata.json
+  9Q16_TERC_human_telomerase_RNA/
+    9Q16.cif
+    metadata.json
+```
+
 Download a ribosome structure from the PDB in mmCIF format, for example:
 
 ```bash
@@ -304,6 +337,31 @@ Run it with:
 ```bash
 python nc_rna_benchmarking/rrna_dist_karrseq.py 4V6X.cif --karr-seq
 ```
+
+For batch processing, pass the same accession CSV used by the downloader:
+
+```bash
+python nc_rna_benchmarking/rrna_dist_karrseq.py \
+  --accessions-csv pdb_accessions.csv \
+  --karr-seq \
+  --outdir rrna_dist_outputs
+```
+
+In CSV mode, the script downloads each accession to
+`nc_rna_benchmarking/pdb_structures/`, then creates one automatically named
+run folder per structure. The folder name includes the PDB ID, optional metadata
+label, mode, and bin sizes:
+
+```text
+rrna_dist_outputs/
+  8QOI_human_80S_ribosome_karrseq_bins-1-5/
+  9Q16_TERC_human_telomerase_RNA_karrseq_bins-1-5/
+  6QX9_U1_snRNA_karrseq_bins-1-5/
+  karrseq_runs_bins-1-5.tsv
+```
+
+For a single CIF input, `--outdir` is also treated as a base directory and the
+actual run folder is named automatically from the CIF stem and bin sizes.
 
 The KARR-seq preset expands to:
 

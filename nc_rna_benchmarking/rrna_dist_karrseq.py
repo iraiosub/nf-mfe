@@ -59,6 +59,23 @@ import shlex
 import warnings
 from pathlib import Path
 
+try:
+    from download_pdb_cifs import (
+        default_outdir as default_structures_dir,
+        download_record,
+        read_accessions,
+        safe_name,
+        write_manifest,
+    )
+except ModuleNotFoundError:
+    from nc_rna_benchmarking.download_pdb_cifs import (
+        default_outdir as default_structures_dir,
+        download_record,
+        read_accessions,
+        safe_name,
+        write_manifest,
+    )
+
 # Rough residue-number spans of human RNAs. These are a fallback when mmCIF
 # entity descriptions do not identify the RNA species.
 # Caveat: bacterial 16S (~1540 nt) and mitochondrial 12S/16S fall inside or near
@@ -647,6 +664,7 @@ def setup_logging(outdir, verbose=False):
             logging.StreamHandler(),
             logging.FileHandler(log_path, mode="w"),
         ],
+        force=True,
     )
     logging.info("writing log to %s", log_path)
 
@@ -669,12 +687,208 @@ def load_runtime_deps():
     cdist = _cdist
 
 
+def bins_slug(bins):
+    return "bins-" + "-".join(str(bin_size) for bin_size in bins)
+
+
+def mode_slug(args):
+    if args.karr_seq:
+        return "karrseq"
+    return f"{args.reduce}_{args.atom.replace(chr(39), '')}"
+
+
+def output_dir_for_run(base_outdir, cif_path, bins, args, metadata=""):
+    stem = Path(cif_path).stem
+    label = safe_name(metadata) if metadata else stem
+    if label.upper() == stem.upper():
+        prefix = stem
+    else:
+        prefix = f"{stem}_{label}"
+    return Path(base_outdir) / f"{prefix}_{mode_slug(args)}_{bins_slug(bins)}"
+
+
+def process_cif(cif_path, outdir, args, bins, logging_deferred=None):
+    os.makedirs(outdir, exist_ok=True)
+    setup_logging(outdir, args.verbose)
+
+    logging.info("reading structure %s", cif_path)
+    logging.info(
+        "atom=%s reduce=%s centroid_weight=%s min_len=%d bins=%s min_sep=%d plots=%s",
+        args.atom, args.reduce, args.centroid_weight, args.min_len,
+        bins, args.min_separation, not args.no_plots,
+    )
+    if args.karr_seq:
+        logging.info("KARR-seq preset active (Wu et al. 2024: 5-nt window centroids)")
+    if logging_deferred:
+        logging.warning(logging_deferred)
+    if args.reduce == "contact":
+        logging.info("contact cutoff = %.1f A (calibrate against known base pairs)", args.contact_cutoff)
+    if args.reduce == "min" and len(bins) > 1:
+        logging.warning(
+            "min-reduced values are not comparable across bin sizes; "
+            "do not put different bin sizes on a shared colour scale"
+        )
+
+    entity_metadata = parse_entity_metadata(cif_path)
+    logging.info(
+        "read entity metadata: %d entities, %d polymer types, %d asym mappings",
+        len(entity_metadata["entities"]),
+        len(entity_metadata["poly_types"]),
+        len(entity_metadata["asym_to_entity"]),
+    )
+    schemes = parse_poly_seq_scheme(cif_path)
+    if schemes:
+        logging.info(
+            "using _pdbx_poly_seq_scheme (%d pdb_strand_id, %d asym_id entries)",
+            len(schemes["pdb_strand_id"]),
+            len(schemes["asym_id"]),
+        )
+    else:
+        logging.info("_pdbx_poly_seq_scheme not found; falling back to numeric residue spans")
+
+    st = gemmi.read_structure(str(cif_path))
+    st.setup_entities()
+    model = st[0]
+
+    seen = {}
+    for chain in model:
+        scheme_rows = schemes.get("pdb_strand_id", {}).get(chain.name)
+        scheme_key = "pdb_strand_id"
+        if scheme_rows is None:
+            scheme_rows = schemes.get("asym_id", {}).get(chain.name)
+            scheme_key = "asym_id"
+
+        entity_id = scheme_rows[0]["entity_id"] if scheme_rows else entity_metadata["asym_to_entity"].get(chain.name)
+        metadata_rna = is_rna_entity(entity_id, entity_metadata)
+        description = entity_description(entity_id, entity_metadata)
+        if metadata_rna is False:
+            logging.debug("skipping chain %s: entity %s is %s", chain.name, entity_id, description)
+            continue
+
+        res = nucleotides(chain)
+        if len(res) < args.min_len:
+            logging.debug("skipping chain %s: %d nucleotide residues", chain.name, len(res))
+            continue
+
+        span = len(scheme_rows) if scheme_rows else residue_span(res)
+
+        if args.label_from_chain:
+            label = "chain"
+            label_source = "chain ID"
+        else:
+            label = description_label(description)
+            label_source = "entity description"
+            if label is None:
+                label = guess_name(span)
+                label_source = "span fallback"
+            if label == "other":
+                logging.warning(
+                    "chain %s (span %d) matches no known human rRNA; labelled 'other'",
+                    chain.name, span,
+                )
+        seen[label] = seen.get(label, 0) + 1
+        if seen[label] > 1:
+            logging.info(
+                "chain %s is %s-like #%d; chain ID keeps output filenames unique",
+                chain.name, label, seen[label],
+            )
+
+        if scheme_rows:
+            offset, seq, xyz, weights = chain_arrays_from_scheme(chain, res, scheme_rows, args.atom)
+            row_ids = [row["seq_id"] for row in scheme_rows]
+            resid_labels = scheme_residue_labels(scheme_rows)
+            axis_source = f"_pdbx_poly_seq_scheme.{scheme_key}"
+        else:
+            try:
+                offset, seq, xyz, weights = chain_arrays(res, args.atom)
+            except ValueError as exc:
+                raise ValueError(f"chain {chain.name}: {exc}") from exc
+            row_ids = [offset + i for i in range(len(seq))]
+            resid_labels = [str(row_id) for row_id in row_ids]
+            axis_source = "numeric residue IDs"
+
+        chain_tag = f"{label}_chain{chain.name}"
+        n_placed = int(np.isfinite(xyz).all(axis=1).sum())
+        write_fasta(outdir / f"{chain_tag}.fa", chain_tag, offset, seq, n_placed)
+        logging.info(
+            "chain=%s label=%s label_source=%s entity=%s span=%d rows=%d placed=%d unmodelled=%d axis=%s first_seq_id=%s",
+            chain.name, label, label_source, entity_id or "", span, len(seq), n_placed, len(seq) - n_placed,
+            axis_source, offset,
+        )
+
+        D_full = None
+        if args.reduce in {"min", "contact"}:
+            D_full = cdist(xyz, xyz)   # NaN propagates for unmodelled residues
+
+        for bin_size in bins:
+            bin_dir = outdir / f"bin_{bin_size:03d}nt"
+            bin_dir.mkdir(parents=True, exist_ok=True)
+            tag = f"{chain_tag}_bin{bin_size}nt"
+
+            out_xyz = window_centroids(xyz, weights, bin_size, args.centroid_weight)
+            rows = bin_row_metadata(seq, xyz, bin_size, row_ids, resid_labels)
+
+            if args.reduce == "centroid":
+                D = cdist(out_xyz, out_xyz)
+            elif args.reduce == "min":
+                D = D_full if bin_size == 1 else block_min_distance(D_full, bin_size)
+            else:
+                D = block_contact_fraction(D_full, bin_size, args.contact_cutoff)
+
+            D = mask_diagonal(D, args.min_separation)
+
+            np.save(bin_dir / f"{tag}.dist.npy", D.astype(np.float32))
+            np.save(bin_dir / f"{tag}.xyz.npy", out_xyz.astype(np.float32))
+            write_bins_tsv(bin_dir / f"{tag}.bins.tsv", rows)
+            write_lookup_tsv(bin_dir / f"{tag}.lookup.tsv", row_ids, resid_labels, xyz, bin_size)
+
+            if not args.no_plots:
+                plot_distance_map(
+                    bin_dir / f"{tag}.distance_map.png",
+                    D, tag, bin_size, args.plot_max_size,
+                    args.reduce, args.contact_cutoff,
+                )
+                plot_distance_map(
+                    bin_dir / f"{tag}.distance_map.masked_diagonal.png",
+                    mask_diagonal_band(D, args.masked_diagonal_width),
+                    f"{tag} diagonal masked (+/- {args.masked_diagonal_width})", bin_size,
+                    args.plot_max_size, args.reduce, args.contact_cutoff,
+                )
+                made_trace = plot_structure_trace(
+                    bin_dir / f"{tag}.structure_trace.png", out_xyz, tag, bin_size,
+                )
+                if not made_trace:
+                    logging.warning("no finite coordinates for %s; skipped structure trace", tag)
+
+            finite = int(np.isfinite(D).sum())
+            logging.info(
+                "wrote %s matrix=%s reduce=%s finite_cells=%d",
+                tag, D.shape, args.reduce, finite,
+            )
+
+    logging.info("done; wrote outputs to %s", outdir)
+    return outdir
+
+
 def build_parser():
     ap = argparse.ArgumentParser(
         description="Windowed physical distance maps from cryo-EM rRNA structures.",
     )
-    ap.add_argument("cif")
-    ap.add_argument("--outdir", default="rrna_dist_outputs")
+    ap.add_argument("cif", nargs="?", help="single input CIF/mmCIF file")
+    ap.add_argument(
+        "--accessions-csv",
+        "--csv",
+        dest="accessions_csv",
+        help="CSV with PDB accession ID in column 1 and optional metadata/name in column 2",
+    )
+    ap.add_argument("--outdir", default="rrna_dist_outputs", help="base output directory")
+    ap.add_argument(
+        "--structures-dir",
+        type=Path,
+        default=default_structures_dir(),
+        help="where CSV-mode downloaded CIF files are stored",
+    )
+    ap.add_argument("--overwrite-downloads", action="store_true", help="re-download existing CSV-mode CIFs")
     ap.add_argument("--atom", default=None, help="C1' (default), P, or 'centroid'")
     ap.add_argument("--min-len", type=int, default=100)
     ap.add_argument(
@@ -767,175 +981,73 @@ def main():
     if args.masked_diagonal_width < 0:
         ap.error("--masked-diagonal-width must be >= 0")
 
+    if bool(args.cif) == bool(args.accessions_csv):
+        ap.error("provide exactly one of a single CIF positional argument or --accessions-csv")
+
     load_runtime_deps()
-    outdir = Path(args.outdir)
-    os.makedirs(outdir, exist_ok=True)
-    setup_logging(outdir, args.verbose)
+    base_outdir = Path(args.outdir)
 
-    logging.info("reading structure %s", args.cif)
-    logging.info(
-        "atom=%s reduce=%s centroid_weight=%s min_len=%d bins=%s min_sep=%d plots=%s",
-        args.atom, args.reduce, args.centroid_weight, args.min_len,
-        bins, args.min_separation, not args.no_plots,
-    )
-    if args.karr_seq:
-        logging.info("KARR-seq preset active (Wu et al. 2024: 5-nt window centroids)")
-    if logging_deferred:
-        logging.warning(logging_deferred)
-    if args.reduce == "contact":
-        logging.info("contact cutoff = %.1f A (calibrate against known base pairs)", args.contact_cutoff)
-    if args.reduce == "min" and len(bins) > 1:
-        logging.warning(
-            "min-reduced values are not comparable across bin sizes; "
-            "do not put different bin sizes on a shared colour scale"
+    if args.accessions_csv:
+        logging.basicConfig(
+            level=logging.DEBUG if args.verbose else logging.INFO,
+            format="%(asctime)s %(levelname)s %(message)s",
         )
+        records = read_accessions(args.accessions_csv)
+        args.structures_dir.mkdir(parents=True, exist_ok=True)
+        base_outdir.mkdir(parents=True, exist_ok=True)
 
-    entity_metadata = parse_entity_metadata(args.cif)
-    logging.info(
-        "read entity metadata: %d entities, %d polymer types, %d asym mappings",
-        len(entity_metadata["entities"]),
-        len(entity_metadata["poly_types"]),
-        len(entity_metadata["asym_to_entity"]),
-    )
-    schemes = parse_poly_seq_scheme(args.cif)
-    if schemes:
-        logging.info(
-            "using _pdbx_poly_seq_scheme (%d pdb_strand_id, %d asym_id entries)",
-            len(schemes["pdb_strand_id"]),
-            len(schemes["asym_id"]),
-        )
+        download_rows = [
+            download_record(record, args.structures_dir, args.overwrite_downloads)
+            for record in records
+        ]
+        structures_manifest = args.structures_dir / "manifest.tsv"
+        write_manifest(structures_manifest, download_rows)
+
+        run_rows = []
+        for record, download_row in zip(records, download_rows):
+            cif_path = Path(download_row["cif"])
+            run_outdir = output_dir_for_run(
+                base_outdir,
+                cif_path,
+                bins,
+                args,
+                metadata=record["metadata"] or download_row["metadata"],
+            )
+            process_cif(cif_path, run_outdir, args, bins, logging_deferred)
+            run_rows.append(
+                {
+                    "pdb_id": record["pdb_id"],
+                    "metadata": record["metadata"],
+                    "cif": str(cif_path),
+                    "outdir": str(run_outdir),
+                    "bins": ",".join(str(bin_size) for bin_size in bins),
+                    "reduce": args.reduce,
+                    "atom": args.atom,
+                }
+            )
+
+        run_manifest = base_outdir / f"karrseq_runs_{bins_slug(bins)}.tsv"
+        with run_manifest.open("w") as fh:
+            fh.write("pdb_id\tmetadata\tcif\toutdir\tbins\treduce\tatom\n")
+            for row in run_rows:
+                fh.write(
+                    f"{row['pdb_id']}\t{row['metadata']}\t{row['cif']}\t"
+                    f"{row['outdir']}\t{row['bins']}\t{row['reduce']}\t{row['atom']}\n"
+                )
+
+        print(f"\nprocessed {len(run_rows)} structures")
+        print(f"download manifest: {structures_manifest}")
+        print(f"run manifest: {run_manifest}")
     else:
-        logging.info("_pdbx_poly_seq_scheme not found; falling back to numeric residue spans")
+        cif_path = Path(args.cif)
+        run_outdir = output_dir_for_run(base_outdir, cif_path, bins, args)
+        process_cif(cif_path, run_outdir, args, bins, logging_deferred)
+        print(f"\nwrote to {run_outdir}/")
 
-    st = gemmi.read_structure(args.cif)
-    st.setup_entities()
-    model = st[0]
-
-    seen = {}
-    for chain in model:
-        scheme_rows = schemes.get("pdb_strand_id", {}).get(chain.name)
-        scheme_key = "pdb_strand_id"
-        if scheme_rows is None:
-            scheme_rows = schemes.get("asym_id", {}).get(chain.name)
-            scheme_key = "asym_id"
-
-        entity_id = scheme_rows[0]["entity_id"] if scheme_rows else entity_metadata["asym_to_entity"].get(chain.name)
-        metadata_rna = is_rna_entity(entity_id, entity_metadata)
-        description = entity_description(entity_id, entity_metadata)
-        if metadata_rna is False:
-            logging.debug("skipping chain %s: entity %s is %s", chain.name, entity_id, description)
-            continue
-
-        res = nucleotides(chain)
-        if len(res) < args.min_len:
-            logging.debug("skipping chain %s: %d nucleotide residues", chain.name, len(res))
-            continue
-
-        span = len(scheme_rows) if scheme_rows else residue_span(res)
-
-        if args.label_from_chain:
-            label = "chain"
-            label_source = "chain ID"
-        else:
-            label = description_label(description)
-            label_source = "entity description"
-            if label is None:
-                label = guess_name(span)
-                label_source = "span fallback"
-            if label == "other":
-                logging.warning(
-                    "chain %s (span %d) matches no known human rRNA; labelled 'other'",
-                    chain.name, span,
-                )
-        seen[label] = seen.get(label, 0) + 1
-        if seen[label] > 1:
-            logging.info(
-                "chain %s is %s-like #%d; chain ID keeps output filenames unique",
-                chain.name, label, seen[label],
-            )
-
-        if scheme_rows:
-            offset, seq, xyz, weights = chain_arrays_from_scheme(chain, res, scheme_rows, args.atom)
-            row_ids = [row["seq_id"] for row in scheme_rows]
-            resid_labels = scheme_residue_labels(scheme_rows)
-            axis_source = f"_pdbx_poly_seq_scheme.{scheme_key}"
-        else:
-            try:
-                offset, seq, xyz, weights = chain_arrays(res, args.atom)
-            except ValueError as exc:
-                raise ValueError(f"chain {chain.name}: {exc}") from exc
-            row_ids = [offset + i for i in range(len(seq))]
-            resid_labels = [str(row_id) for row_id in row_ids]
-            axis_source = "numeric residue IDs"
-
-        chain_tag = f"{label}_chain{chain.name}"
-        n_placed = int(np.isfinite(xyz).all(axis=1).sum())
-        write_fasta(outdir / f"{chain_tag}.fa", chain_tag, offset, seq, n_placed)
-        logging.info(
-            "chain=%s label=%s label_source=%s entity=%s span=%d rows=%d placed=%d unmodelled=%d axis=%s first_seq_id=%s",
-            chain.name, label, label_source, entity_id or "", span, len(seq), n_placed, len(seq) - n_placed,
-            axis_source, offset,
-        )
-
-        # Nucleotide-level distances are only needed by the block reductions.
-        D_full = None
-        if args.reduce in {"min", "contact"}:
-            D_full = cdist(xyz, xyz)   # NaN propagates for unmodelled residues
-
-        for bin_size in bins:
-            bin_dir = outdir / f"bin_{bin_size:03d}nt"
-            bin_dir.mkdir(parents=True, exist_ok=True)
-            tag = f"{chain_tag}_bin{bin_size}nt"
-
-            out_xyz = window_centroids(xyz, weights, bin_size, args.centroid_weight)
-            rows = bin_row_metadata(seq, xyz, bin_size, row_ids, resid_labels)
-
-            if args.reduce == "centroid":
-                # Distances come from the same centroids written to .xyz.npy, so
-                # the two files stay mutually consistent.
-                D = cdist(out_xyz, out_xyz)
-            elif args.reduce == "min":
-                D = D_full if bin_size == 1 else block_min_distance(D_full, bin_size)
-            else:
-                D = block_contact_fraction(D_full, bin_size, args.contact_cutoff)
-
-            D = mask_diagonal(D, args.min_separation)
-
-            np.save(bin_dir / f"{tag}.dist.npy", D.astype(np.float32))
-            np.save(bin_dir / f"{tag}.xyz.npy", out_xyz.astype(np.float32))
-            write_bins_tsv(bin_dir / f"{tag}.bins.tsv", rows)
-            write_lookup_tsv(bin_dir / f"{tag}.lookup.tsv", row_ids, resid_labels, xyz, bin_size)
-
-            if not args.no_plots:
-                plot_distance_map(
-                    bin_dir / f"{tag}.distance_map.png",
-                    D, tag, bin_size, args.plot_max_size,
-                    args.reduce, args.contact_cutoff,
-                )
-                plot_distance_map(
-                    bin_dir / f"{tag}.distance_map.masked_diagonal.png",
-                    mask_diagonal_band(D, args.masked_diagonal_width),
-                    f"{tag} diagonal masked (+/- {args.masked_diagonal_width})", bin_size,
-                    args.plot_max_size, args.reduce, args.contact_cutoff,
-                )
-                made_trace = plot_structure_trace(
-                    bin_dir / f"{tag}.structure_trace.png", out_xyz, tag, bin_size,
-                )
-                if not made_trace:
-                    logging.warning("no finite coordinates for %s; skipped structure trace", tag)
-
-            finite = int(np.isfinite(D).sum())
-            logging.info(
-                "wrote %s matrix=%s reduce=%s finite_cells=%d",
-                tag, D.shape, args.reduce, finite,
-            )
-
-    logging.info("done; wrote outputs to %s", outdir)
-    print(f"\nwrote to {outdir}/")
     plot_note = " and PNG plots" if not args.no_plots else ""
     print(
-        "Root contains per-chain .fa files; each bin folder contains .dist.npy, "
-        f".xyz.npy, .bins.tsv, .lookup.tsv{plot_note}."
+        "Each run folder contains per-chain .fa files; each bin folder contains "
+        f".dist.npy, .xyz.npy, .bins.tsv, .lookup.tsv{plot_note}."
     )
 
 

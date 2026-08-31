@@ -147,3 +147,4 @@ slurm-*
 
 # ncRNA benchmarking generated outputs
 rrna_dist_outputs/
+nc_rna_benchmarking/pdb_structures/

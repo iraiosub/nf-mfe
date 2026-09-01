@@ -503,16 +503,32 @@ def enrich_metadata_batched(entity_rows, workers, timeout, retries, batch_size):
                 batch_rows = future.result()
             except Exception as exc:
                 logging.warning(
-                    "metadata batch failed for rows %d-%d: %s",
+                    "metadata batch failed for rows %d-%d: %s -- falling back to "
+                    "per-entity REST fetch",
                     start + 1,
                     start + len(batch),
                     exc,
                 )
-                batch_rows = []
-                for row in batch:
-                    failed = dict(row)
-                    failed["metadata_status"] = "failed: %s" % exc
-                    batch_rows.append(failed)
+                # Preserve batch order explicitly: as_completed() resolves in
+                # completion order, and rows are placed below by position
+                # (enriched[start + offset]), so indexing by completion order
+                # would silently swap different entities' metadata.
+                batch_rows = [None] * len(batch)
+                entity_futures = {
+                    pool.submit(fetch_entity_metadata, row, timeout, retries): idx
+                    for idx, row in enumerate(batch)
+                }
+                for entity_future in as_completed(entity_futures):
+                    idx = entity_futures[entity_future]
+                    try:
+                        batch_rows[idx] = entity_future.result()
+                    except Exception as entity_exc:
+                        failed = dict(batch[idx])
+                        failed["metadata_status"] = "failed: %s" % entity_exc
+                        batch_rows[idx] = failed
+                        logging.warning(
+                            "metadata failed for %s: %s", batch[idx]["rcsb_id"], entity_exc
+                        )
             for offset, row in enumerate(batch_rows):
                 enriched[start + offset] = row
             logging.info("metadata batches %d/%d", done, len(batches))

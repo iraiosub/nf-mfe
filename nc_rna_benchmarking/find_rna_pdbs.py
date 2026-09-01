@@ -246,7 +246,7 @@ def collapse_accessions(entity_rows, min_length, experimental_method, representa
         if representatives:
             cluster_count = len({row.get("sequence_cluster_id", row["rcsb_id"]) for row in rows})
             metadata = (
-                "%sRNA exact-sequence representatives; %d sequence groups; entities %s"
+                "%sRNA exact-sequence-per-organism representatives; %d sequence groups; entities %s"
                 % (method_prefix, cluster_count, " ".join(entity_ids))
             )
         else:
@@ -548,6 +548,29 @@ RRNA_SVALUE_RE = re.compile(r"\b(\d+(?:\.\d+)?)S", re.I)
 # 40S/60S -> eukaryotic SSU/LSU, 70S/80S -> whole ribosome), not a single RNA
 # molecule, so a match here is never trusted as the molecule's own identity.
 PARTICLE_SVALUES = {"30", "40", "50", "60", "70", "80"}
+# "mitochondrial" alone misses real cases: depositors routinely title an
+# entry "39S/55S mitoribosome" without ever writing "mitochondrial" in the
+# individual chain's description (e.g. RCSB 9CN3, 8K2A).
+MITO_COMPARTMENT_RE = re.compile(r"mitochondrial|mitoribosom|\bmt-", re.I)
+# Pre-rRNA processing intermediates (internal/external transcribed spacers)
+# are not any mature rRNA molecule -- their length can coincidentally land
+# near a reference value (e.g. human ITS2 at 1167nt vs mt-12S's 954nt) and
+# must never be force-matched into that bucket by the length fallback below.
+SPACER_RE = re.compile(r"\bits[12]\b|external transcribed spacer|internal transcribed spacer|[35]['’]ets\b", re.I)
+# Reference lengths (nt) let a known organism's own entity length overrule a
+# depositor's free-text label rather than just trusting it -- catches both
+# missing compartment words (label right, "(mt)" missing) and outright
+# mislabels (e.g. RCSB 9RU9's human LSU rRNA entity is described "23S rRNA",
+# copied from a bacterial deposition template; humans have no 23S rRNA at
+# all -- its 5069nt length is human cytoplasmic 28S almost exactly).
+# Scoped to Homo sapiens for now, since it is always a candidate priority
+# species; extend this table if other organisms show the same failure.
+ORGANISM_RRNA_REFERENCE_NT = {
+    "Homo sapiens": {
+        "cytoplasmic": {"18S": 1869.0, "5.8S": 156.0, "28S": 5070.0, "5S": 120.0},
+        "mitochondrial": {"12S": 954.0, "16S": 1559.0},
+    },
+}
 NON_RIBOSOMAL_TYPE_RULES = (
     ("spliceosomal RNA", lambda text: "snrna" in text or "spliceosom" in text),
     ("group I/II intron", lambda text: "group i intron" in text or "group ii intron" in text),
@@ -560,35 +583,137 @@ NON_RIBOSOMAL_TYPE_RULES = (
 )
 
 
+def _split_organisms(organism):
+    if not organism:
+        return []
+    return [name.strip() for name in organism.split(";") if name.strip()]
+
+
 def _extract_rrna_svalue(text):
     values = RRNA_SVALUE_RE.findall(text)
     if not values:
         return None
     molecule_level = [v for v in values if v not in PARTICLE_SVALUES]
-    return (molecule_level[0], True) if molecule_level else (values[0], False)
+    if molecule_level:
+        return "%sS" % molecule_level[0].upper(), "molecule"
+    return values[0], "particle"
 
 
-def _label_ribosomal(source_text, combined_lower, trust_svalue):
-    mito = " (mt)" if ("mitochondrial" in combined_lower or re.search(r"\bmt-", combined_lower)) else ""
-    extraction = _extract_rrna_svalue(source_text) if trust_svalue else None
-    if extraction:
-        value, is_molecule_level = extraction
-        if is_molecule_level:
-            return "%sS rRNA%s" % (value.upper(), mito)
-        if value in ("30", "40"):
-            return "SSU rRNA (unspecified)%s" % mito
-        if value in ("50", "60"):
-            return "LSU rRNA (unspecified)%s" % mito
-        return "ribosomal RNA (unspecified)%s" % mito
+# How far an entity's own length may sit from a reference rRNA length and
+# still be treated as that molecule (partial cryo-EM models regularly drop
+# unresolved expansion segments, so some slack is needed) -- whichever of
+# the two is more permissive: a flat floor for the shortest rRNAs (5S/5.8S,
+# where a percentage alone would be unreasonably tight) or a percentage for
+# the longer ones. Anything outside this is left unspecified rather than
+# guessed: a bare "ribosomal RNA" at 300nt or 700nt is not obviously 5.8S or
+# mt-12S just because those happen to be the nearest reference values.
+MIN_ABSOLUTE_LENGTH_TOLERANCE_NT = 30.0
+MAX_RELATIVE_LENGTH_DEVIATION = 0.20
+
+
+def _nearest_reference_label(length, reference):
+    if length is None or not reference:
+        return None
+    label, ref_length = min(reference.items(), key=lambda item: abs(item[1] - length))
+    tolerance = max(MIN_ABSOLUTE_LENGTH_TOLERANCE_NT, MAX_RELATIVE_LENGTH_DEVIATION * ref_length)
+    if abs(ref_length - length) > tolerance:
+        return None
+    return label
+
+
+def _unspecified_ribosomal_label(source_text, particle_value, mito_suffix):
+    if particle_value in ("30", "40"):
+        return "SSU rRNA (unspecified)%s" % mito_suffix
+    if particle_value in ("50", "60"):
+        return "LSU rRNA (unspecified)%s" % mito_suffix
+    if particle_value is not None:
+        return "ribosomal RNA (unspecified)%s" % mito_suffix
     lowered = source_text.lower()
     if "small subunit" in lowered or "ssu" in lowered:
-        return "SSU rRNA (unspecified)%s" % mito
+        return "SSU rRNA (unspecified)%s" % mito_suffix
     if "large subunit" in lowered or "lsu" in lowered:
-        return "LSU rRNA (unspecified)%s" % mito
-    return "ribosomal RNA (unspecified)%s" % mito
+        return "LSU rRNA (unspecified)%s" % mito_suffix
+    return "ribosomal RNA (unspecified)%s" % mito_suffix
 
 
-def _classify_text(source_text, combined_lower, trust_svalue):
+def _label_ribosomal(source_text, combined_lower, trust_svalue, organism, length):
+    extraction = _extract_rrna_svalue(source_text) if trust_svalue else None
+    svalue = extraction[0] if extraction and extraction[1] == "molecule" else None
+    particle_value = extraction[0] if extraction and extraction[1] == "particle" else None
+
+    if svalue is None and SPACER_RE.search(combined_lower):
+        mito_suffix = " (mt)" if MITO_COMPARTMENT_RE.search(combined_lower) else ""
+        return "pre-rRNA spacer (unspecified)%s" % mito_suffix
+
+    # source_organisms can be a "; "-joined multi-organism string (chimeric
+    # or co-purified constructs) -- match each named organism individually
+    # rather than the whole joined string, which would never hit the table.
+    organism_reference = None
+    for name in _split_organisms(organism):
+        if name in ORGANISM_RRNA_REFERENCE_NT:
+            organism_reference = ORGANISM_RRNA_REFERENCE_NT[name]
+            break
+
+    if organism_reference is not None:
+        # For an organism we have a reference table for, the S-value itself
+        # is compartment-diagnostic (human 16S/12S are ALWAYS mitochondrial,
+        # 18S/28S/5.8S/5S ALWAYS cytoplasmic) -- trust that directly rather
+        # than depending on the title spelling "mitochondrial"/"mt-" in a
+        # form our keyword regex happens to catch (real depositor variants
+        # we've seen: "mitoribosome", "mtLSU", plain "16S rRNA" with the
+        # compartment only implied by context).
+        for compartment, reference in organism_reference.items():
+            if svalue in reference:
+                return "%s rRNA%s" % (svalue, " (mt)" if compartment == "mitochondrial" else "")
+
+        # svalue is missing, or names something that isn't a real rRNA for
+        # this organism at all (e.g. a bacterial-style "23S" on a human
+        # entity, likely copy-pasted from another deposition's template).
+        # This organism's rRNAs have well-separated lengths across BOTH
+        # compartments together, so use the entity's own length instead of
+        # trusting text at all -- this recovers the correct compartment too,
+        # without needing a compartment keyword anywhere in the text.
+        combined_reference = {}
+        compartment_of = {}
+        for compartment, reference in organism_reference.items():
+            for label, ref_length in reference.items():
+                combined_reference[label] = ref_length
+                compartment_of[label] = compartment
+        nearest = _nearest_reference_label(length, combined_reference)
+        if nearest is not None:
+            if svalue is not None:
+                logging.warning(
+                    "molecule-type override: %r is labelled %r but its length "
+                    "(%.0fnt) matches %s %s rRNA -- using %s instead",
+                    source_text, svalue, length, organism, nearest, nearest,
+                )
+            mito_suffix = " (mt)" if compartment_of[nearest] == "mitochondrial" else ""
+            return "%s rRNA%s" % (nearest, mito_suffix)
+
+        # Neither the text nor the length lands close enough to any known
+        # rRNA for this organism. This organism's rRNA repertoire is fully
+        # known, so an unmatched svalue (e.g. "23S" on a human entity) is
+        # not trusted as a fallback label either -- it's already established
+        # as invalid for this organism, and guessing would just trade one
+        # wrong specific label for another.
+        if svalue is not None:
+            logging.warning(
+                "molecule-type unresolved: %r (organism %s, %s) doesn't match any "
+                "known rRNA closely enough -- leaving unspecified rather than guessing",
+                source_text, organism, ("%.0fnt" % length) if length is not None else "no length",
+            )
+        mito_suffix = " (mt)" if MITO_COMPARTMENT_RE.search(combined_lower) else ""
+        return _unspecified_ribosomal_label(source_text, particle_value, mito_suffix)
+
+    # No reference table for this organism -- keep the older, purely
+    # textual heuristic (organism-specific length validation isn't available).
+    mito_suffix = " (mt)" if MITO_COMPARTMENT_RE.search(combined_lower) else ""
+    if svalue is not None:
+        return "%s rRNA%s" % (svalue, mito_suffix)
+    return _unspecified_ribosomal_label(source_text, particle_value, mito_suffix)
+
+
+def _classify_text(source_text, combined_lower, trust_svalue, organism, length):
     lowered = source_text.lower()
     is_ribosomal = (
         any(kw in lowered for kw in RIBOSOMAL_KEYWORDS)
@@ -596,14 +721,14 @@ def _classify_text(source_text, combined_lower, trust_svalue):
         or (trust_svalue and bool(RRNA_SVALUE_RE.search(source_text)))
     )
     if is_ribosomal:
-        return _label_ribosomal(source_text, combined_lower, trust_svalue)
+        return _label_ribosomal(source_text, combined_lower, trust_svalue, organism, length)
     for label, matches in NON_RIBOSOMAL_TYPE_RULES:
         if matches(lowered):
             return label
     return None
 
 
-def classify_molecule_type(description, entry_title):
+def classify_molecule_type(description, entry_title, organism=None, sequence_length=None):
     """Classify an RNA polymer entity by molecule identity.
 
     The entity's own `description` is trusted first (it names that specific
@@ -614,22 +739,43 @@ def classify_molecule_type(description, entry_title):
     as a specific molecule name (it almost always names the particle, not a
     single RNA chain within it), so title-derived hits land in an
     "(unspecified)" bucket rather than guessing a number.
+
+    Mitochondrial vs cytoplasmic compartment is read from title+description
+    keywords, independently of which one supplied the molecule name. For an
+    organism in ORGANISM_RRNA_REFERENCE_NT, `sequence_length` is used to
+    validate the text-derived label (or fill it in / correct it) against
+    that organism's known rRNA lengths, since depositor free text is not
+    always trustworthy (wrong S-value, or a missing "mitochondrial").
     """
     description = description or ""
     entry_title = entry_title or ""
     combined_lower = ("%s %s" % (description, entry_title)).lower()
     return (
-        _classify_text(description, combined_lower, trust_svalue=True)
-        or _classify_text(entry_title, combined_lower, trust_svalue=False)
+        _classify_text(description, combined_lower, True, organism, sequence_length)
+        or _classify_text(entry_title, combined_lower, False, organism, sequence_length)
         or "other/unclassified"
     )
+
+
+def _row_sequence_length(row):
+    for key in ("entity_sequence_length", "canonical_sequence_length"):
+        value = row.get(key)
+        if value not in (None, ""):
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                continue
+    return None
 
 
 def select_molecule_representatives(representative_rows, priority_species, other_species_count):
     by_type = {}
     ordered_types = []
     for row in representative_rows:
-        mtype = classify_molecule_type(row.get("description"), row.get("entry_title"))
+        mtype = classify_molecule_type(
+            row.get("description"), row.get("entry_title"),
+            organism=row.get("source_organisms"), sequence_length=_row_sequence_length(row),
+        )
         if mtype not in by_type:
             by_type[mtype] = []
             ordered_types.append(mtype)
@@ -652,7 +798,13 @@ def select_molecule_representatives(representative_rows, priority_species, other
             by_organism.setdefault(organism, []).append(row)
 
         picks = []
-        priority_rows = by_organism.pop(priority_species, None)
+        # Match against each individually-named organism, not the whole
+        # (possibly "; "-joined, for chimeric/co-purified constructs) key,
+        # so a joined string containing the priority species still counts.
+        priority_keys = [
+            key for key in by_organism if priority_species in _split_organisms(key)
+        ]
+        priority_rows = [row for key in priority_keys for row in by_organism.pop(key)]
         if priority_rows:
             picks.append(("priority", best_of(priority_rows)))
 
@@ -744,7 +896,7 @@ def select_sequence_representatives(entity_rows, ranking):
                 selected.append(enriched)
 
     logging.info(
-        "selected %d exact-sequence representatives from %d RNA entities",
+        "selected %d exact-sequence-per-organism representatives from %d RNA entities",
         len(selected), len(entity_rows),
     )
     return annotated, selected
@@ -844,13 +996,15 @@ def build_parser():
     ap.add_argument(
         "--representatives",
         action="store_true",
-        help="deduplicate exact deposited RNA sequences and output one representative entity per sequence",
+        help="deduplicate exact deposited RNA sequences per organism and output one "
+        "representative entity per (organism, sequence) group -- the same exact "
+        "sequence in two different organisms is kept as two representatives",
     )
     ap.add_argument(
         "--representative-rank",
         choices=["newest", "best-resolution"],
         default="newest",
-        help="ranking used within exact-sequence groups (default: newest)",
+        help="ranking used within exact-sequence-per-organism groups (default: newest)",
     )
     ap.add_argument(
         "--priority-species",
@@ -1010,7 +1164,7 @@ def main():
     print("wrote downstream CSV: %s" % accessions_out)
     print("wrote entity manifest: %s" % manifest_out)
     if args.representatives:
-        print("selected %d exact-sequence representatives" % len(representative_rows))
+        print("selected %d exact-sequence-per-organism representatives" % len(representative_rows))
         print("wrote representatives manifest: %s" % representatives_out)
         print("curated %d molecule-type representatives" % len(selected_rows))
         print("wrote selected manifest: %s" % selected_out)

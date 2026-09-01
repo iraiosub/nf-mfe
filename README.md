@@ -231,7 +231,7 @@ nc_rna_benchmarking/rna_pdbs_min200_cryoem.entities.tsv
 ```
 
 To clean this down automatically to one representative structure per exact
-deposited RNA sequence, add `--representatives`:
+deposited RNA sequence *per organism*, add `--representatives`:
 
 ```bash
 python nc_rna_benchmarking/find_rna_pdbs.py \
@@ -241,9 +241,12 @@ python nc_rna_benchmarking/find_rna_pdbs.py \
 ```
 
 This fetches RCSB metadata in batches, hashes each canonical RNA sequence, groups
-identical sequences, and selects one representative entity per sequence group.
-By default the newest released entry wins inside each exact-sequence group. For
-structure-quality-first selection, use `--representative-rank best-resolution`.
+identical sequences within the same source organism, and selects one
+representative entity per (organism, sequence) group -- the same exact
+sequence deposited under two different organisms is kept as two
+representatives, not collapsed into one. By default the newest released entry
+wins inside each group. For structure-quality-first selection, use
+`--representative-rank best-resolution`.
 The cleaned downstream CSV is written as:
 
 ```text
@@ -257,6 +260,50 @@ ID, second column a short metadata label. It can be passed directly to the CIF
 downloader or to `rrna_dist_karrseq.py --accessions-csv`. The `.entities.tsv`
 file keeps the entity-level provenance, because one PDB entry can contain more
 than one long RNA chain.
+
+### Curated one-per-molecule-type set
+
+`--representatives` also writes a further-curated set: one bucket per
+molecule type (rRNA split by subtype -- 16S/18S/23S/28S/etc, mitochondrial
+kept separate from cytoplasmic), capped at one entry for `--priority-species`
+(default `Homo sapiens`, if present) plus up to `--other-species-count`
+(default 2) other species chosen by best resolution:
+
+```text
+nc_rna_benchmarking/rna_pdbs_min200_cryoem_representatives.selected.tsv
+nc_rna_benchmarking/rna_pdbs_min200_cryoem_representatives.selected.accessions.csv
+```
+
+Molecule type is read from each entity's own `description`, not the PDB
+entry title -- a title like "80S ribosome bound to mRNA" describes the whole
+particle and would misclassify the mRNA chain as rRNA if trusted. For
+`Homo sapiens` specifically (`ORGANISM_RRNA_REFERENCE_NT` in
+`find_rna_pdbs.py`), the S-value itself decides compartment -- 18S/5.8S/28S/5S
+are always cytoplasmic, 12S/16S are always mitochondrial -- and the entity's
+own sequence length is used to fix a missing/wrong label rather than trusting
+depositor free text (real cases found this way: a human 23S-labelled chain
+that was actually 28S, and mitochondrial entries missing the word
+"mitochondrial" entirely). A `logging.warning` is emitted whenever text and
+length disagree. Extend that table to cover other organisms if the same
+class of error shows up there.
+
+### Descriptive plots before downloading
+
+`describe_rna_pdbs.py` turns any entities/representatives/selected TSV from
+`find_rna_pdbs.py` into a summary PNG plus a log summary, with no network
+calls -- run it before `--download` to sanity-check a query:
+
+```bash
+python nc_rna_benchmarking/describe_rna_pdbs.py \
+  nc_rna_benchmarking/rna_pdbs_min200_cryoem_representatives.representatives.tsv
+```
+
+For the `.representatives.tsv`/`.entities.tsv` shape it plots organism
+counts, molecule-type breakdown, sequence-length/resolution histograms,
+release-year timeline, and experimental-method breakdown. For the curated
+`.selected.tsv` shape (detected via the `molecule_type` column) it instead
+plots one row per molecule type, one dot per selected entity (PDB ID /
+organism / resolution), colored by priority vs. other-species pick.
 
 The finder filters on RCSB's deposited polymer sequence length
 (`entity_poly.rcsb_sample_sequence_length`), not the number of residues resolved

@@ -84,7 +84,11 @@ def build_figure(rows, out_path, title, top_organisms):
     bar_panel(axes[0, 0], organism_counts(rows), "top organisms", top_n=top_organisms)
 
     type_counts = Counter(
-        classify_molecule_type(row.get("description"), row.get("entry_title")) for row in rows
+        classify_molecule_type(
+            row.get("description"), row.get("entry_title"),
+            organism=row.get("source_organisms"), sequence_length=sequence_length(row),
+        )
+        for row in rows
     )
     bar_panel(axes[0, 1], type_counts, "molecule type")
 
@@ -200,7 +204,11 @@ def log_summary(rows):
     pdb_ids = {row.get("pdb_id") for row in rows}
     organisms = organism_counts(rows)
     type_counts = Counter(
-        classify_molecule_type(row.get("description"), row.get("entry_title")) for row in rows
+        classify_molecule_type(
+            row.get("description"), row.get("entry_title"),
+            organism=row.get("source_organisms"), sequence_length=sequence_length(row),
+        )
+        for row in rows
     )
     lengths = [v for v in (sequence_length(row) for row in rows) if v is not None]
     resolutions = [

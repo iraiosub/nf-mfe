@@ -153,6 +153,91 @@ nextflow run main.nf \
   -profile docker
 ```
 
+## Methods-only figures
+
+Plot existing final MFE tables without recalculating energies:
+
+```bash
+nextflow run main.nf -entry METHOD_FIGURES \
+  --input assets/method_figures.example.tsv \
+  --outdir results_methods -profile docker
+```
+
+The TSV requires `sample_id`, `file_path`, and `method`; replicas sharing a
+`method` are pooled. Edit the example paths before running. Inputs are the
+pipeline's final `*_mfe.tsv` files, including `dot_bracket`, arm sequences and
+coordinates. Shuffled means are optional. No sample-date filtering is applied;
+choose the desired samples in the sheet.
+
+There are only three filtering/annotation arguments, all off by default:
+
+- `--exclude_chromosomes 'rDNA,chrM'`: exclude a hybrid if **either arm** maps
+  to a listed chromosome/contig. Matching is exact after removing `chr` and
+  treating `M`/`MT` as aliases; this is not an RNA-biotype filter.
+- `--gtf annotation.gtf.gz`: require both complete arms inside one same-strand
+  gene and split the overview into pure-exon/intron-overlapping columns.
+  Without a GTF, all same-chromosome, same-strand hybrids are shown in one
+  “All” column; gene membership cannot be determined. The span figure always
+  pools exon/intron categories.
+- `--gene_types 'protein_coding,lncRNA'`: retain only genes with these exact
+  GTF `gene_type` (or Ensembl `gene_biotype`) values. Requires `--gtf`; omitted
+  means all biotypes. Use names present in your reference (older annotations
+  may use `lincRNA` rather than `lncRNA`). Unknown types fail clearly. This
+  is a positive selection, not the previous automatic structural-RNA filter.
+
+For example:
+
+```bash
+nextflow run main.nf -entry METHOD_FIGURES \
+  --input methods.tsv --outdir results_methods -profile singularity \
+  --gtf gencode.annotation.gtf.gz \
+  --gene_types 'protein_coding,lncRNA' --exclude_chromosomes 'rDNA'
+```
+
+To generate these figures at the end of the normal sequence/MFE workflow,
+add `--plot_method_figures` and an optional `method` column to its input sheet.
+Without `method`, each sample is its own method label. This replaces the old
+per-sample MFE summary plots for that run; the pipeline's existing default
+behavior is unchanged when the option is omitted.
+
+`results_methods/plot_method_figures/` contains exactly two figures, each as
+PDF and PNG, with no main title or bottom explanatory text:
+
+- `method_overview`: grey violins with inset boxes for shortest-arm pairing
+  and paired-base GC%, followed by raw MFE and MFE per base-pair densities.
+- `method_span`: raw MFE and MFE per base-pair density bands, one method per
+  column and genomic-span bins down the page, without exon/intron facets.
+
+Raw MFE axes start at −70 kcal/mol; this is only a display limit. Span is
+`max(lr,rr) - min(ll,rl)`, including both arms and the intervening sequence.
+MFE per bp divides by the observed dot-bracket **base-pair count**, using that
+same denominator for the shuffled mean. Each pair contributes two paired
+nucleotides. GC counts only paired positions across both arms; internal
+RNAduplex windows are resolved before counting. Existing RNA structures and
+energies are preserved; ambiguous GC windows require a verified ViennaRNA
+coordinate recovery. Zero-pair structures remain in pairing percentages but
+have undefined paired GC and normalized MFE. Malformed structures are excluded.
+When controls exist, MFE curves use pairs with finite observed/shuffled values;
+otherwise observed-only curves are generated.
+
+The same folder exports:
+
+- `plot_source.tsv.gz`: every retained valid-structure row, with sample/method,
+  original row identity and a stable source-row index, coordinates, dot bracket, pairing/GC metrics,
+  raw/normalized observed and shuffled MFE, span/bin and eligibility flags.
+- `plot_group_counts.tsv`: counts, means, medians and quartiles behind each
+  plotted distribution, by figure, method, group, span bin, metric and source.
+- `sample_group_counts.tsv`: source/GC/observed/matched counts by sample,
+  method, annotation group and span bin.
+- `plot_notes.json`: metric definitions, populations and density settings.
+
+`prepare_method_plot_data/` contains each sample's QC JSON with
+input/exclusion/retention counts. Intermediate feature tables stay in the
+Nextflow work directory. The module reuses the existing
+`pandas_ushuffle_viennarna` and `matplotlib_numpy_pandas_scipy` containers;
+no new image is required. Density/violin shapes use deterministic samples of
+at most 10,000 rows, while boxplots and exported statistics use full data.
+
 ## rRNA Structure Distance Maps
 
 This repository also includes a standalone helper script,

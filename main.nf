@@ -19,6 +19,7 @@ include { CALCULATE_MFE } from './modules/local/calculate_mfe'
 include { CALCULATE_MFE_CONTROLS } from './modules/local/calculate_mfe_controls'
 include { CONCATENATE_TABLES } from './modules/local/concatenate_tables'
 include { PLOT_MFE_SUMMARY } from './modules/local/plot_mfe_summary'
+include { METHOD_PLOTS } from './workflows/method_figures'
 
 /*
 ========================================================================================
@@ -27,22 +28,21 @@ include { PLOT_MFE_SUMMARY } from './modules/local/plot_mfe_summary'
 */
 
 workflow {
+    main:
 
     // Create input channel from samplesheet or glob pattern
     def ch_input
     if (params.input) {
         // Read samplesheet (TSV format: sample_id, file_path)
-        ch_input = channel
-            .fromPath(params.input)
+        ch_input = Channel.fromPath(params.input)
             .splitCsv(header: true, sep: '\t')
             .map { row ->
-                def meta = [id: row.sample_id]
+                def meta = [id: row.sample_id, method: row.method ?: row.sample_id]
                 [meta, file(row.file_path, checkIfExists: true)]
             }
     } else if (params.input_pattern) {
         // Use glob pattern
-        ch_input = channel
-            .fromPath(params.input_pattern, checkIfExists: true)
+        ch_input = Channel.fromPath(params.input_pattern, checkIfExists: true)
             .map { file_item ->
                 def meta = [id: file_item.baseName.replaceAll(/\..*$/, '')]
                 [meta, file_item]
@@ -52,8 +52,8 @@ workflow {
     }
 
     // Load reference genome FASTA
-    def ch_fasta = channel.fromPath(params.fasta, checkIfExists: true).first()
-    def ch_fai = channel.fromPath(params.fai, checkIfExists: true).first()
+    def ch_fasta = file(params.fasta, checkIfExists: true)
+    def ch_fai = file(params.fai, checkIfExists: true)
 
     // Step 1: Split tables into chunks
     SPLIT_TABLE(
@@ -81,6 +81,7 @@ workflow {
     // Step 5: Calculate MFE
     def run_controls = params.shuffled_mfe || params.flipped_arm_mfe
 
+    def ch_mfe
     if (!run_controls) {
 
         CALCULATE_MFE(ADD_SEQUENCES.out.sequence_table)
@@ -98,8 +99,12 @@ workflow {
     CONCATENATE_TABLES(ch_grouped)
 
     // Step 7: Plot concatenated shuffled-MFE tables
-    if (run_controls) {
+    if (run_controls && !params.plot_method_figures) {
         PLOT_MFE_SUMMARY(CONCATENATE_TABLES.out.final_table)
+    }
+
+    if (params.plot_method_figures) {
+        METHOD_PLOTS(CONCATENATE_TABLES.out.final_table)
     }
 
     // Emit final outputs
@@ -121,4 +126,24 @@ workflow.onComplete {
 
 workflow.onError {
     println "Oops... Pipeline execution stopped with the following message: ${workflow.errorMessage}"
+}
+
+// Plot existing final MFE tables without extracting sequences or recalculating MFE.
+workflow METHOD_FIGURES {
+    main:
+    if (!params.input) {
+        error 'METHOD_FIGURES requires --input TSV with sample_id, file_path and method columns'
+    }
+    def tables = Channel.fromPath(params.input, checkIfExists: true)
+        .splitCsv(header: true, sep: '\t')
+        .map { row ->
+            if (!row.sample_id || !row.file_path || !row.method) {
+                error 'METHOD_FIGURES samplesheet requires nonempty sample_id, file_path and method'
+            }
+            if (!(row.sample_id ==~ /[A-Za-z0-9][A-Za-z0-9_.-]*/)) {
+                error "Invalid sample_id: ${row.sample_id}; use letters, numbers, underscores, dots or hyphens"
+            }
+            tuple([id: row.sample_id, method: row.method], file(row.file_path, checkIfExists: true))
+        }
+    METHOD_PLOTS(tables)
 }

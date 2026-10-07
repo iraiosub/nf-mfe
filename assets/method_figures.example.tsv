@@ -1,0 +1,4 @@
+sample_id	file_path	method
+CAR_rep1	/path/to/CAR_rep1_mfe.tsv	CAR-SPLASH
+CAR_rep2	/path/to/CAR_rep2_mfe.tsv	CAR-SPLASH
+PARIS_rep1	/path/to/PARIS_rep1_mfe.tsv	PARIS
